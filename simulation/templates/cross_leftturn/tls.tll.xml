@@ -1,0 +1,33 @@
+<tlLogics>
+    <!-- static program "0", protected left turns, 8 phases:
+         NS straight 30 / y 3 / NS left 15 / y 3 / EW straight 30 / y 3 / EW left 15 / y 3.
+         link index layout (per approach: right, straight-l0, straight-l1, left):
+         N=0..3, E=4..7, S=8..11, W=12..15 -->
+    <tlLogic id="TL" type="static" programID="0" offset="0">
+        <phase duration="30" state="GGGrrrrrGGGrrrrr"/>
+        <phase duration="3"  state="yyyrrrrryyyrrrrr"/>
+        <phase duration="15" state="rrrGrrrrrrrGrrrr"/>
+        <phase duration="3"  state="rrryrrrrrrryrrrr"/>
+        <phase duration="30" state="rrrrGGGrrrrrGGGr"/>
+        <phase duration="3"  state="rrrryyyrrrrryyyr"/>
+        <phase duration="15" state="rrrrrrrGrrrrrrrG"/>
+        <phase duration="3"  state="rrrrrrryrrrrrrry"/>
+    </tlLogic>
+
+    <connection from="N_in" to="W_out" fromLane="0" toLane="0" tls="TL" linkIndex="0"/>
+    <connection from="N_in" to="S_out" fromLane="0" toLane="0" tls="TL" linkIndex="1"/>
+    <connection from="N_in" to="S_out" fromLane="1" toLane="1" tls="TL" linkIndex="2"/>
+    <connection from="N_in" to="E_out" fromLane="2" toLane="2" tls="TL" linkIndex="3"/>
+    <connection from="E_in" to="N_out" fromLane="0" toLane="0" tls="TL" linkIndex="4"/>
+    <connection from="E_in" to="W_out" fromLane="0" toLane="0" tls="TL" linkIndex="5"/>
+    <connection from="E_in" to="W_out" fromLane="1" toLane="1" tls="TL" linkIndex="6"/>
+    <connection from="E_in" to="S_out" fromLane="2" toLane="2" tls="TL" linkIndex="7"/>
+    <connection from="S_in" to="E_out" fromLane="0" toLane="0" tls="TL" linkIndex="8"/>
+    <connection from="S_in" to="N_out" fromLane="0" toLane="0" tls="TL" linkIndex="9"/>
+    <connection from="S_in" to="N_out" fromLane="1" toLane="1" tls="TL" linkIndex="10"/>
+    <connection from="S_in" to="W_out" fromLane="2" toLane="2" tls="TL" linkIndex="11"/>
+    <connection from="W_in" to="S_out" fromLane="0" toLane="0" tls="TL" linkIndex="12"/>
+    <connection from="W_in" to="E_out" fromLane="0" toLane="0" tls="TL" linkIndex="13"/>
+    <connection from="W_in" to="E_out" fromLane="1" toLane="1" tls="TL" linkIndex="14"/>
+    <connection from="W_in" to="N_out" fromLane="2" toLane="2" tls="TL" linkIndex="15"/>
+</tlLogics>

@@ -1,0 +1,20 @@
+{
+  "state": "data/traffic_states/synthetic_demo.json",
+  "scenario_id": "synthetic_demo",
+  "template": "cross_basic",
+  "scenario_spec": "data/results/experiments/smoke_routes_cross_basic/scenario_smoke.json",
+  "flow_multipliers": {
+    "north": 1.3,
+    "south": 1.3,
+    "east": 0.8,
+    "west": 0.8
+  },
+  "lane_closures": [
+    {
+      "approach": "east",
+      "n_lanes": 1
+    }
+  ],
+  "duration_sec": 300.0,
+  "seed": 0
+}

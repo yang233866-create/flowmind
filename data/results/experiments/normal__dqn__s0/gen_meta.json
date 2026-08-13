@@ -1,0 +1,15 @@
+{
+  "state": "data/traffic_states/synthetic_demo.json",
+  "scenario_id": "synthetic_demo",
+  "template": "cross_basic",
+  "scenario_spec": "{'name': 'normal', 'flow_multipliers': {'north': 1.0, 'south': 1.0, 'east': 1.0, 'west': 1.0}, 'lane_closures': [], 'duration_sec': 1800, 'base_state': 'data/traffic_states/synthetic_demo.json'}",
+  "flow_multipliers": {
+    "north": 1.0,
+    "south": 1.0,
+    "east": 1.0,
+    "west": 1.0
+  },
+  "lane_closures": [],
+  "duration_sec": 1800.0,
+  "seed": 0
+}

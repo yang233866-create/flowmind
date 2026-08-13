@@ -1,0 +1,341 @@
+"""FlowMind app 公共工具：路径常量、数据读取、子进程流式运行、Plotly 样式。
+
+所有页面只依赖 docs/CONTRACTS.md 定义的文件格式，不 import 其他模块的代码
+（experiments.scenarios 例外，用 try/except 兜底）。
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+# ---------------------------------------------------------------- 路径常量
+
+ROOT = Path(__file__).resolve().parents[1]
+
+_venv_py = ROOT / ".venv" / "Scripts" / "python.exe"
+PYTHON = str(_venv_py) if _venv_py.exists() else sys.executable
+
+DATA_DIR = ROOT / "data"
+VIDEOS_DIR = DATA_DIR / "videos"
+STATES_DIR = DATA_DIR / "traffic_states"
+RESULTS_DIR = DATA_DIR / "results"
+EXPERIMENTS_DIR = RESULTS_DIR / "experiments"
+SPECS_DIR = RESULTS_DIR / "scenario_specs"
+VISION_OUT_DIR = RESULTS_DIR / "vision"
+TWIN_OUT_DIR = RESULTS_DIR / "twin"
+ARENA_CSV = RESULTS_DIR / "arena_summary.csv"
+FIGURES_DIR = ROOT / "figures"
+MODELS_DIR = ROOT / "models"
+TEMPLATES_DIR = ROOT / "simulation" / "templates"
+
+
+def ensure_dirs() -> None:
+    for d in (VIDEOS_DIR, STATES_DIR, EXPERIMENTS_DIR, SPECS_DIR,
+              VISION_OUT_DIR, TWIN_OUT_DIR, FIGURES_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------- 配色与文案（与 scripts/sci_style.py 保持一致）
+
+NPG = ["#E64B35", "#4DBBD5", "#00A087", "#3C5488"]
+
+STRATEGY_COLORS = {
+    "fixed": "#3C5488",
+    "actuated": "#4DBBD5",
+    "dqn": "#E64B35",
+    "ppo": "#00A087",
+}
+STRATEGY_LABELS = {
+    "fixed": "Fixed-Time 定时",
+    "actuated": "Actuated 感应",
+    "dqn": "DQN",
+    "ppo": "PPO",
+}
+STRATEGIES = list(STRATEGY_COLORS)
+
+DIRECTION_COLORS = {
+    "north": "#3C5488",
+    "south": "#4DBBD5",
+    "east": "#E64B35",
+    "west": "#00A087",
+}
+DIRECTIONS = ["north", "south", "east", "west"]
+DIRECTION_LABELS = {
+    "north": "北 North",
+    "south": "南 South",
+    "east": "东 East",
+    "west": "西 West",
+}
+
+TEMPLATES = ["cross_basic", "cross_leftturn", "arterial_minor"]
+TEMPLATE_LABELS = {
+    "cross_basic": "cross_basic · 十字路口（每进口 2 车道）",
+    "cross_leftturn": "cross_leftturn · 十字路口（专用左转道 + 保护左转相位）",
+    "arterial_minor": "arterial_minor · 主干 3 车道 × 次干 1 车道",
+}
+
+METRIC_LABELS = {
+    "avg_waiting_s": "平均等待时间 (s)",
+    "avg_travel_time_s": "平均行程时间 (s)",
+    "throughput_veh": "通过车辆数 (veh)",
+    "avg_queue_veh": "平均排队 (veh)",
+    "max_queue_veh": "最大排队 (veh)",
+    "avg_speed_mps": "平均车速 (m/s)",
+    "teleports": "瞬移次数",
+}
+# 数值越大越好的指标；其余越小越好
+METRIC_HIGHER_BETTER = {"throughput_veh", "avg_speed_mps"}
+METRIC_INT = {"throughput_veh", "teleports"}
+
+VEHICLE_LABELS = {"car": "小汽车", "bus": "公交", "truck": "货车", "motorcycle": "摩托车"}
+
+
+def fmt_metric(key: str, value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "—"
+    if key in METRIC_INT:
+        return f"{value:,.0f}"
+    return f"{value:,.2f}"
+
+
+def improvement_pct(value: float, baseline: float, key: str) -> float | None:
+    """相对 baseline 的改善百分比，正数=更好。"""
+    try:
+        if baseline is None or value is None or pd.isna(baseline) or pd.isna(value) or baseline == 0:
+            return None
+    except TypeError:
+        return None
+    change = (value - baseline) / abs(baseline) * 100.0
+    return change if key in METRIC_HIGHER_BETTER else -change
+
+
+# ---------------------------------------------------------------- 页面骨架
+
+_CSS = """
+<style>
+.fm-hero {
+  background: linear-gradient(120deg, #3C5488 0%, #4DBBD5 55%, #00A087 100%);
+  border-radius: 14px; padding: 26px 32px; color: #fff; margin-bottom: 6px;
+}
+.fm-hero h1 { margin: 0 0 6px 0; font-size: 1.9rem; color: #fff; }
+.fm-hero p { margin: 0; opacity: .92; font-size: 1.0rem; }
+.fm-flow { display: flex; align-items: stretch; gap: 8px; margin: 12px 0 4px 0; flex-wrap: wrap; }
+.fm-node {
+  flex: 1 1 140px; background: var(--secondary-background-color, #f5f6fa);
+  border: 1px solid rgba(60,84,136,.18); border-radius: 12px;
+  padding: 12px 10px; text-align: center; min-width: 130px;
+}
+.fm-node-icon { font-size: 1.5rem; }
+.fm-node-title { font-weight: 700; margin-top: 4px; }
+.fm-node-sub { font-size: .78rem; opacity: .7; margin-top: 2px; }
+.fm-arrow { align-self: center; font-size: 1.2rem; color: #3C5488; opacity: .6; }
+div[data-testid="stMetric"] { border-radius: 12px; }
+</style>
+"""
+
+
+def page_setup(title: str, icon: str) -> None:
+    st.set_page_config(page_title=f"{title} · FlowMind AI", page_icon=icon,
+                       layout="wide", initial_sidebar_state="expanded")
+    st.markdown(_CSS, unsafe_allow_html=True)
+    ensure_dirs()
+    with st.sidebar:
+        st.markdown("## 🚦 FlowMind AI")
+        st.caption(
+            "视频感知 → TrafficState → SUMO 数字孪生 → 多策略信号控制对比 → What-if 推演。"
+            "纯软件交通信控优化平台。"
+        )
+        st.divider()
+
+
+def safe_page_link(page: str, label: str, icon: str | None = None) -> None:
+    """st.page_link 在单页运行/测试环境下会抛异常，做兜底。"""
+    try:
+        st.page_link(page, label=label, icon=icon)
+    except Exception:
+        st.caption(f"{icon or ''} {label}")
+
+
+def empty_state(message: str, link: str | None = None, link_label: str = "") -> None:
+    st.info(message, icon="💡")
+    if link:
+        safe_page_link(link, label=link_label or link, icon="👉")
+
+
+# ---------------------------------------------------------------- 数据读取
+
+def load_json(path: Path) -> dict | None:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def list_state_files() -> list[Path]:
+    if not STATES_DIR.exists():
+        return []
+    return sorted(STATES_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def load_states() -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    for p in list_state_files():
+        data = load_json(p)
+        if isinstance(data, dict) and "approaches" in data:
+            out[p.stem] = data
+    return out
+
+
+def load_arena() -> pd.DataFrame | None:
+    if not ARENA_CSV.exists():
+        return None
+    try:
+        df = pd.read_csv(ARENA_CSV)
+    except Exception:
+        return None
+    return df if len(df) else None
+
+
+def arena_metric_cols(df: pd.DataFrame) -> list[str]:
+    return [k for k in METRIC_LABELS if k in df.columns]
+
+
+_EXP_ID_RE = re.compile(r"^(?P<scenario>.+)__(?P<strategy>[A-Za-z0-9]+)__s(?P<seed>\d+)$")
+
+
+def parse_exp_id(name: str) -> dict | None:
+    m = _EXP_ID_RE.match(name)
+    if not m:
+        return None
+    d = m.groupdict()
+    d["seed"] = int(d["seed"])
+    return d
+
+
+def list_experiments() -> list[dict]:
+    """扫描 data/results/experiments/，返回 [{exp_id, scenario, strategy, seed, dir, metrics}]。"""
+    if not EXPERIMENTS_DIR.exists():
+        return []
+    rows = []
+    for d in sorted(EXPERIMENTS_DIR.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not d.is_dir():
+            continue
+        info = parse_exp_id(d.name) or {"scenario": d.name, "strategy": "?", "seed": -1}
+        info["exp_id"] = d.name
+        info["dir"] = d
+        info["metrics"] = load_json(d / "metrics_summary.json")
+        rows.append(info)
+    return rows
+
+
+def load_timeseries(exp_dir: Path) -> pd.DataFrame | None:
+    p = Path(exp_dir) / "timeseries.csv"
+    if not p.exists():
+        return None
+    try:
+        df = pd.read_csv(p)
+    except Exception:
+        return None
+    return df if len(df) else None
+
+
+def load_templates_meta() -> dict[str, dict | None]:
+    return {name: load_json(TEMPLATES_DIR / name / "meta.json") for name in TEMPLATES}
+
+
+def known_scenarios() -> list[str]:
+    """场景名：优先 experiments.scenarios 注册表，失败则扫描已有产物。"""
+    names: list[str] = []
+    try:
+        import importlib
+
+        mod = importlib.import_module("experiments.scenarios")
+        for attr in ("SCENARIOS", "SCENARIO_REGISTRY", "REGISTRY", "ALL_SCENARIOS", "scenarios"):
+            obj = getattr(mod, attr, None)
+            if isinstance(obj, dict):
+                names.extend(str(k) for k in obj)
+                break
+            if isinstance(obj, (list, tuple)) and obj and all(isinstance(x, str) for x in obj):
+                names.extend(obj)
+                break
+        else:
+            fn = getattr(mod, "list_scenarios", None)
+            if callable(fn):
+                names.extend(str(x) for x in fn())
+    except Exception:
+        pass
+    if SPECS_DIR.exists():
+        names.extend(p.stem for p in sorted(SPECS_DIR.glob("*.json")))
+    for row in list_experiments():
+        names.append(row["scenario"])
+    seen: set[str] = set()
+    uniq = []
+    for n in names:
+        if n and n not in seen:
+            seen.add(n)
+            uniq.append(n)
+    return uniq
+
+
+# ---------------------------------------------------------------- 子进程运行（流式输出）
+
+def stream_command(cmd: list[str], log_placeholder, max_lines: int = 300) -> tuple[int, list[str]]:
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=str(ROOT),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace", bufsize=1, env=env,
+        )
+    except OSError as e:
+        log_placeholder.code(f"启动失败: {e}", language="text")
+        return -1, [str(e)]
+    lines: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        lines.append(line.rstrip())
+        log_placeholder.code("\n".join(lines[-max_lines:]) or "…", language="text")
+    proc.wait()
+    return proc.returncode, lines
+
+
+def run_cli(cmd: list[str], title: str) -> bool:
+    """展示命令 + st.status 流式日志，返回是否成功。"""
+    st.code(subprocess.list2cmdline(cmd), language="bash")
+    with st.status(f"{title}…", expanded=True) as status:
+        placeholder = st.empty()
+        code, _ = stream_command(cmd, placeholder)
+        if code == 0:
+            status.update(label=f"✅ {title} 完成", state="complete", expanded=False)
+        else:
+            status.update(label=f"❌ {title} 失败（退出码 {code}）", state="error", expanded=True)
+    return code == 0
+
+
+# ---------------------------------------------------------------- Plotly 样式
+
+def style_fig(fig, height: int = 380, title: str | None = None, unified_hover: bool = False):
+    fig.update_layout(
+        template="plotly_white",
+        colorway=NPG,
+        height=height,
+        title=title,
+        margin=dict(l=10, r=10, t=52 if title else 30, b=10),
+        font=dict(family="Times New Roman, Georgia, serif", size=13, color="#333333"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, bgcolor="rgba(0,0,0,0)"),
+        hovermode="x unified" if unified_hover else "closest",
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_yaxes(gridcolor="rgba(60,84,136,.15)", zeroline=False)
+    return fig

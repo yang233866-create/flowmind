@@ -1,0 +1,12 @@
+{
+  "name": "normal",
+  "flow_multipliers": {
+    "north": 1.0,
+    "south": 1.0,
+    "east": 1.0,
+    "west": 1.0
+  },
+  "lane_closures": [],
+  "duration_sec": 1800,
+  "base_state": "data/traffic_states/synthetic_demo.json"
+}

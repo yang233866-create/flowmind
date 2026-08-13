@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+install_*.log
+data/videos/*.mp4
+data/videos/*.avi
+models/*.pt
+data/results/tb/
+data/simulations/
+*.egg-info/
+.streamlit/

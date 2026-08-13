@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.1",
+  "scenario_id": "synthetic_demo",
+  "source": {
+    "video": null,
+    "fps": null,
+    "frames": null,
+    "duration_sec": 600.0,
+    "analyzed_at": "2026-08-13T04:00:00"
+  },
+  "duration_sec": 600.0,
+  "approaches": {
+    "north": {
+      "flow_vph": 900.0,
+      "queue_est": 8.0,
+      "vehicle_mix": {"car": 0.82, "bus": 0.05, "truck": 0.10, "motorcycle": 0.03},
+      "observed": true
+    },
+    "south": {
+      "flow_vph": 850.0,
+      "queue_est": 7.0,
+      "vehicle_mix": {"car": 0.85, "bus": 0.04, "truck": 0.08, "motorcycle": 0.03},
+      "observed": true
+    },
+    "east": {
+      "flow_vph": 1100.0,
+      "queue_est": 12.0,
+      "vehicle_mix": {"car": 0.80, "bus": 0.06, "truck": 0.11, "motorcycle": 0.03},
+      "observed": true
+    },
+    "west": {
+      "flow_vph": 600.0,
+      "queue_est": 4.0,
+      "vehicle_mix": {"car": 0.88, "bus": 0.03, "truck": 0.06, "motorcycle": 0.03},
+      "observed": false
+    }
+  },
+  "turning_ratio": {
+    "north": {"left": 0.15, "straight": 0.70, "right": 0.15},
+    "south": {"left": 0.12, "straight": 0.73, "right": 0.15},
+    "east": {"left": 0.18, "straight": 0.67, "right": 0.15},
+    "west": {"left": 0.15, "straight": 0.70, "right": 0.15}
+  },
+  "profile_bins_sec": 300,
+  "flow_profile": null
+}

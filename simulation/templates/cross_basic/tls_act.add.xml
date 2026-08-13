@@ -1,0 +1,10 @@
+<additional>
+    <!-- actuated program "act" for the same tls: green phases stretch between
+         minDur=5 and maxDur=60 based on auto-generated induction loops -->
+    <tlLogic id="TL" type="actuated" programID="act" offset="0">
+        <phase duration="33" minDur="5" maxDur="60" state="GGGgrrrrGGGgrrrr"/>
+        <phase duration="3"  state="yyyyrrrryyyyrrrr"/>
+        <phase duration="33" minDur="5" maxDur="60" state="rrrrGGGgrrrrGGGg"/>
+        <phase duration="3"  state="rrrryyyyrrrryyyy"/>
+    </tlLogic>
+</additional>

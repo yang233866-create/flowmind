@@ -1,0 +1,22 @@
+<connections>
+    <!-- north approach: lane0 = straight + right, lane1 = straight + left -->
+    <connection from="N_in" to="W_out" fromLane="0" toLane="0"/>
+    <connection from="N_in" to="S_out" fromLane="0" toLane="0"/>
+    <connection from="N_in" to="S_out" fromLane="1" toLane="1"/>
+    <connection from="N_in" to="E_out" fromLane="1" toLane="1"/>
+    <!-- east approach -->
+    <connection from="E_in" to="N_out" fromLane="0" toLane="0"/>
+    <connection from="E_in" to="W_out" fromLane="0" toLane="0"/>
+    <connection from="E_in" to="W_out" fromLane="1" toLane="1"/>
+    <connection from="E_in" to="S_out" fromLane="1" toLane="1"/>
+    <!-- south approach -->
+    <connection from="S_in" to="E_out" fromLane="0" toLane="0"/>
+    <connection from="S_in" to="N_out" fromLane="0" toLane="0"/>
+    <connection from="S_in" to="N_out" fromLane="1" toLane="1"/>
+    <connection from="S_in" to="W_out" fromLane="1" toLane="1"/>
+    <!-- west approach -->
+    <connection from="W_in" to="S_out" fromLane="0" toLane="0"/>
+    <connection from="W_in" to="E_out" fromLane="0" toLane="0"/>
+    <connection from="W_in" to="E_out" fromLane="1" toLane="1"/>
+    <connection from="W_in" to="N_out" fromLane="1" toLane="1"/>
+</connections>

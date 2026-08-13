@@ -1,0 +1,11 @@
+<edges>
+    <!-- east-west arterial: 3 lanes; north-south minor road: 1 lane -->
+    <edge id="N_in" from="N" to="TL" numLanes="1" speed="13.89"/>
+    <edge id="N_out" from="TL" to="N" numLanes="1" speed="13.89"/>
+    <edge id="S_in" from="S" to="TL" numLanes="1" speed="13.89"/>
+    <edge id="S_out" from="TL" to="S" numLanes="1" speed="13.89"/>
+    <edge id="E_in" from="E" to="TL" numLanes="3" speed="13.89"/>
+    <edge id="E_out" from="TL" to="E" numLanes="3" speed="13.89"/>
+    <edge id="W_in" from="W" to="TL" numLanes="3" speed="13.89"/>
+    <edge id="W_out" from="TL" to="W" numLanes="3" speed="13.89"/>
+</edges>

@@ -1,0 +1,8 @@
+<additional>
+    <tlLogic id="TL" type="actuated" programID="act" offset="0">
+        <phase duration="45" minDur="5" maxDur="60" state="rrrGGGGgrrrGGGGg"/>
+        <phase duration="3"  state="rrryyyyyrrryyyyy"/>
+        <phase duration="20" minDur="5" maxDur="60" state="GGgrrrrrGGgrrrrr"/>
+        <phase duration="3"  state="yyyrrrrryyyrrrrr"/>
+    </tlLogic>
+</additional>

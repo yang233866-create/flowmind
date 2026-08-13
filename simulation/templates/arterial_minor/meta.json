@@ -1,0 +1,17 @@
+{
+  "name": "arterial_minor",
+  "tls_id": "TL",
+  "approaches": {
+    "north": {"in_edge": "N_in", "out_edge": "N_out", "n_lanes": 1},
+    "south": {"in_edge": "S_in", "out_edge": "S_out", "n_lanes": 1},
+    "east": {"in_edge": "E_in", "out_edge": "E_out", "n_lanes": 3},
+    "west": {"in_edge": "W_in", "out_edge": "W_out", "n_lanes": 3}
+  },
+  "movements": {
+    "north": {"left": "E_out", "straight": "S_out", "right": "W_out"},
+    "south": {"left": "W_out", "straight": "N_out", "right": "E_out"},
+    "east": {"left": "S_out", "straight": "W_out", "right": "N_out"},
+    "west": {"left": "N_out", "straight": "E_out", "right": "S_out"}
+  },
+  "programs": {"static": "0", "actuated": "act"}
+}

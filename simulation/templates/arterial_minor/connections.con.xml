@@ -1,0 +1,23 @@
+<connections>
+    <!-- minor approaches (1 lane): all movements from lane 0 -->
+    <connection from="N_in" to="W_out" fromLane="0" toLane="0"/>
+    <connection from="N_in" to="S_out" fromLane="0" toLane="0"/>
+    <connection from="N_in" to="E_out" fromLane="0" toLane="2"/>
+
+    <connection from="S_in" to="E_out" fromLane="0" toLane="0"/>
+    <connection from="S_in" to="N_out" fromLane="0" toLane="0"/>
+    <connection from="S_in" to="W_out" fromLane="0" toLane="2"/>
+
+    <!-- arterial approaches (3 lanes): lane0 straight+right, lane1 straight, lane2 straight+left -->
+    <connection from="E_in" to="N_out" fromLane="0" toLane="0"/>
+    <connection from="E_in" to="W_out" fromLane="0" toLane="0"/>
+    <connection from="E_in" to="W_out" fromLane="1" toLane="1"/>
+    <connection from="E_in" to="W_out" fromLane="2" toLane="2"/>
+    <connection from="E_in" to="S_out" fromLane="2" toLane="0"/>
+
+    <connection from="W_in" to="S_out" fromLane="0" toLane="0"/>
+    <connection from="W_in" to="E_out" fromLane="0" toLane="0"/>
+    <connection from="W_in" to="E_out" fromLane="1" toLane="1"/>
+    <connection from="W_in" to="E_out" fromLane="2" toLane="2"/>
+    <connection from="W_in" to="N_out" fromLane="2" toLane="0"/>
+</connections>

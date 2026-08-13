@@ -1,0 +1,17 @@
+{
+  "template": "cross_basic",
+  "route_file": "C:\\Users\\y\\FlowMind\\data\\results\\experiments\\smoke_routes_closure\\routes.rou.xml",
+  "strategy": "fixed",
+  "seed": 0,
+  "duration_sec": 300,
+  "lane_closures": [
+    {
+      "approach": "east",
+      "n_lanes": 1
+    }
+  ],
+  "closed_lanes": [
+    "E_in_0"
+  ],
+  "gui": false
+}
