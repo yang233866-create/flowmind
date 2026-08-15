@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.1",
+  "scenario_id": "demo",
+  "source": {
+    "video": "C:\\Users\\y\\FlowMind\\data\\videos\\demo.mp4",
+    "fps": 25.0,
+    "frames": 538,
+    "duration_sec": 21.52,
+    "analyzed_at": "2026-08-15T19:46:47"
+  },
+  "duration_sec": 21.52,
+  "approaches": {
+    "north": {
+      "flow_vph": 1003.7,
+      "queue_est": null,
+      "vehicle_mix": {
+        "car": 0.666666,
+        "bus": 0.166667,
+        "truck": 0.166667,
+        "motorcycle": 0.0
+      },
+      "observed": true
+    },
+    "south": {
+      "flow_vph": 1171.0,
+      "queue_est": null,
+      "vehicle_mix": {
+        "car": 0.714286,
+        "bus": 0.0,
+        "truck": 0.285714,
+        "motorcycle": 0.0
+      },
+      "observed": true
+    },
+    "east": {
+      "flow_vph": 400.0,
+      "queue_est": null,
+      "vehicle_mix": {
+        "car": 0.692308,
+        "bus": 0.076923,
+        "truck": 0.230769,
+        "motorcycle": 0.0
+      },
+      "observed": false
+    },
+    "west": {
+      "flow_vph": 400.0,
+      "queue_est": null,
+      "vehicle_mix": {
+        "car": 0.692308,
+        "bus": 0.076923,
+        "truck": 0.230769,
+        "motorcycle": 0.0
+      },
+      "observed": false
+    }
+  },
+  "turning_ratio": {
+    "north": {
+      "left": 0.15,
+      "straight": 0.7,
+      "right": 0.15
+    },
+    "south": {
+      "left": 0.15,
+      "straight": 0.7,
+      "right": 0.15
+    },
+    "east": {
+      "left": 0.15,
+      "straight": 0.7,
+      "right": 0.15
+    },
+    "west": {
+      "left": 0.15,
+      "straight": 0.7,
+      "right": 0.15
+    }
+  },
+  "profile_bins_sec": 5,
+  "flow_profile": {
+    "north": [
+      720.0,
+      2880.0,
+      720.0,
+      0.0,
+      0.0
+    ],
+    "south": [
+      2160.0,
+      720.0,
+      720.0,
+      1440.0,
+      0.0
+    ],
+    "east": [],
+    "west": []
+  }
+}

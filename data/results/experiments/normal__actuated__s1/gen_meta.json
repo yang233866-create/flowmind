@@ -1,0 +1,16 @@
+{
+  "state": "data\\traffic_states\\demo_001.json",
+  "scenario_id": "demo_001",
+  "template": "cross_basic",
+  "scenario_spec": "{'name': 'normal', 'flow_multipliers': {'north': 1.0, 'south': 1.0, 'east': 1.0, 'west': 1.0}, 'lane_closures': [], 'duration_sec': 1800, 'base_state': 'data\\\\traffic_states\\\\demo_001.json'}",
+  "flow_multipliers": {
+    "north": 1.0,
+    "south": 1.0,
+    "east": 1.0,
+    "west": 1.0
+  },
+  "lane_closures": [],
+  "duration_sec": 1800.0,
+  "n_flows": 84,
+  "seed": 1
+}

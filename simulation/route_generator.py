@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
@@ -38,6 +39,45 @@ def load_meta(template: str) -> dict:
     return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
+def flow_begin_times(route_path: str | Path) -> list[float]:
+    """Departure times of every <flow>/<vehicle> in document order."""
+    root = ET.parse(str(route_path)).getroot()
+    times = []
+    for el in root:
+        val = el.get("begin") or el.get("depart")
+        if val is not None:
+            times.append(float(val))
+    return times
+
+
+def route_horizon(route_path: str | Path) -> float:
+    """Last second at which the route file still injects demand."""
+    root = ET.parse(str(route_path)).getroot()
+    ends = []
+    for el in root:
+        val = el.get("end") or el.get("begin") or el.get("depart")
+        if val is not None:
+            ends.append(float(val))
+    return max(ends) if ends else 0.0
+
+
+def check_sorted(route_path: str | Path) -> None:
+    """Raise if the route file would be silently truncated by SUMO.
+
+    SUMO only warns ("Route file should be sorted by departure time, ignoring
+    '<id>'!") and then drops every out-of-order element, so an unsorted file
+    looks like a successful run on a fraction of the intended demand.
+    """
+    times = flow_begin_times(route_path)
+    for i, (a, b) in enumerate(zip(times, times[1:])):
+        if b < a:
+            raise ValueError(
+                f"{route_path} is not sorted by departure time "
+                f"(element {i + 1} begins at {b} after {a}); SUMO would silently "
+                "drop it. Regenerate with simulation.route_generator."
+            )
+
+
 def _turning(state: dict, approach: str) -> dict:
     ratios = (state.get("turning_ratio") or {}).get(approach) or {}
     result = {}
@@ -60,29 +100,55 @@ def _vehicle_mix(app_state: dict) -> dict:
 
 
 def _flow_bins(state: dict, approach: str, duration: float) -> list[tuple[float, float, float]]:
-    """Return [(begin, end, vph), ...] for one approach."""
+    """Return [(begin, end, vph), ...] for one approach, covering [0, duration).
+
+    `flow_profile` only describes the *observed* window (for a 21.5 s clip with
+    profile_bins_sec=5 that is 21.5 s of a 1800 s episode). Beyond it we fall back
+    to the approach's aggregate `flow_vph` in a single bin. Holding the last
+    profile bin instead would freeze whatever value the video happened to end on
+    -- typically 0.0 -- and collapse the whole episode's demand to zero.
+
+    The profile is clamped to the state's own `duration_sec`: the final bin is
+    usually partial (21.5 s / 5 s leaves 1.5 s), and its vph was computed over
+    that short span, so replaying it for a full `profile_bins_sec` would inject
+    several times the vehicles the camera actually saw.
+    """
     app = (state.get("approaches") or {}).get(approach) or {}
     base_vph = float(app.get("flow_vph") or DEFAULT_FLOW_VPH)
     profile = (state.get("flow_profile") or {}).get(approach)
-    bin_sec = float(state.get("profile_bins_sec") or 300)
-    if not profile:
+    # A profile with no usable bin width has no time axis; assuming a default
+    # would stretch e.g. a 25 s observation over 1500 s, so drop to the
+    # aggregate rate instead of inventing one.
+    raw_bin = state.get("profile_bins_sec")
+    bin_sec = float(raw_bin) if raw_bin else 0.0
+    if not profile or bin_sec <= 0:
         return [(0.0, duration, base_vph)]
-    bins = []
-    t = 0.0
-    i = 0
-    while t < duration:
-        end = min(t + bin_sec, duration)
-        # if the profile is shorter than duration, hold the last bin value
-        vph = float(profile[min(i, len(profile) - 1)])
-        bins.append((t, end, vph))
-        t = end
-        i += 1
+
+    observed = float(state.get("duration_sec") or 0.0)
+    horizon = min(duration, observed) if observed > 0 else duration
+
+    bins: list[tuple[float, float, float]] = []
+    for i, vph in enumerate(profile):
+        begin = i * bin_sec
+        if begin >= horizon:
+            break
+        bins.append((begin, min(begin + bin_sec, horizon), float(vph)))
+
+    covered = bins[-1][1] if bins else 0.0
+    if covered < duration:
+        bins.append((covered, duration, base_vph))
     return bins
 
 
 def generate_routes(state_path: str | Path, template: str, out_dir: str | Path,
-                    scenario: str | Path | dict | None = None, seed: int = 0) -> Path:
-    """Build <out_dir>/routes.rou.xml + gen_meta.json. Returns route file path."""
+                    scenario: str | Path | dict | None = None, seed: int = 0,
+                    duration_sec: float | None = None) -> Path:
+    """Build <out_dir>/routes.rou.xml + gen_meta.json. Returns route file path.
+
+    `duration_sec` overrides both the scenario spec and the TrafficState; pass it
+    when the consumer's horizon is authoritative (e.g. RL training episodes),
+    otherwise the flows can stop long before the episode does.
+    """
     state = json.loads(Path(state_path).read_text(encoding="utf-8"))
     meta = load_meta(template)
     spec = {}
@@ -93,7 +159,7 @@ def generate_routes(state_path: str | Path, template: str, out_dir: str | Path,
 
     multipliers = spec.get("flow_multipliers") or {}
     lane_closures = spec.get("lane_closures") or []
-    duration = float(spec.get("duration_sec")
+    duration = float(duration_sec or spec.get("duration_sec")
                      or state.get("duration_sec") or 1800.0)
 
     out_dir = Path(out_dir)
@@ -106,6 +172,8 @@ def generate_routes(state_path: str | Path, template: str, out_dir: str | Path,
             f'accel="{p["accel"]}" decel="{p["decel"]}" maxSpeed="{p["maxSpeed"]}" '
             f'sigma="{p["sigma"]}"/>')
 
+    # (begin, flow_id, xml) -- collected first, emitted sorted by begin below
+    flows: list[tuple[float, str, str]] = []
     for approach in APPROACHES:
         app_state = (state.get("approaches") or {}).get(approach) or {}
         in_edge = meta["approaches"][approach]["in_edge"]
@@ -120,16 +188,24 @@ def generate_routes(state_path: str | Path, template: str, out_dir: str | Path,
                     if rate <= 0.01:
                         continue
                     fid = f"f_{approach}_{mv}_{vt}_{int(begin)}"
-                    lines.append(
+                    flows.append((begin, fid,
                         f'    <flow id={quoteattr(fid)} type="{vt}" '
                         f'from="{in_edge}" to="{to_edge}" '
                         f'begin="{begin:.0f}" end="{end:.0f}" '
                         f'vehsPerHour="{rate:.3f}" '
-                        f'departLane="best" departSpeed="max"/>')
+                        f'departLane="best" departSpeed="max"/>'))
+
+    # SUMO requires route input sorted by departure time and *silently ignores*
+    # every out-of-order element (warning only, easy to miss with
+    # --no-warnings). Emitting per approach would interleave begin times as
+    # 0,5,10,.. per approach and drop ~90% of the demand, so sort here.
+    flows.sort(key=lambda f: (f[0], f[1]))
+    lines.extend(xml for _, _, xml in flows)
     lines.append('</routes>')
 
     route_path = out_dir / "routes.rou.xml"
     route_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    check_sorted(route_path)
 
     gen_meta = {
         "state": str(state_path),
@@ -139,6 +215,7 @@ def generate_routes(state_path: str | Path, template: str, out_dir: str | Path,
         "flow_multipliers": multipliers,
         "lane_closures": lane_closures,
         "duration_sec": duration,
+        "n_flows": len(flows),
         "seed": seed,
     }
     (out_dir / "gen_meta.json").write_text(
@@ -153,9 +230,13 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--scenario", default=None)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--duration", type=float, default=None,
+                    help="episode horizon in seconds; overrides the scenario spec "
+                         "and the TrafficState's own duration_sec")
     args = ap.parse_args()
     path = generate_routes(args.state, args.template, args.out,
-                           scenario=args.scenario, seed=args.seed)
+                           scenario=args.scenario, seed=args.seed,
+                           duration_sec=args.duration)
     print(f"routes written: {path}")
 
 

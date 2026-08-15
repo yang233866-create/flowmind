@@ -14,9 +14,11 @@ import numpy as np
 import pandas as pd
 
 from experiments.scenarios import SCENARIOS
-from experiments.scenario_runner import RESULTS_ROOT, run_experiment
+from experiments.scenario_runner import RESULTS_ROOT, RUN_META, run_experiment
 
 ARENA_CSV = Path("data/results/arena_summary.csv")
+
+PROVENANCE_COLS = ["base_state", "base_state_sha1", "model_sha1", "run_key"]
 
 METRIC_LABELS = {
     "avg_waiting_s": "Avg waiting time (s)",
@@ -30,9 +32,16 @@ METRIC_LABELS = {
 LOWER_BETTER = {"avg_waiting_s", "avg_travel_time_s", "avg_queue_veh", "max_queue_veh", "teleports"}
 
 
-def collect_summary() -> pd.DataFrame:
-    """Scan all experiment dirs and rebuild the arena summary CSV."""
-    rows = []
+def collect_summary(strict: bool = True) -> pd.DataFrame:
+    """Scan all experiment dirs and rebuild the arena summary CSV.
+
+    A directory name only encodes (scenario, strategy, seed), so scanning blindly
+    will happily put runs built from different TrafficStates -- or against
+    different model checkpoints -- side by side in one comparison table. Every run
+    therefore carries a run_meta.json fingerprint (see scenario_runner); rows
+    without one, or from a minority base state, are dropped when strict.
+    """
+    rows, unfingerprinted = [], []
     if RESULTS_ROOT.exists():
         for exp_dir in sorted(RESULTS_ROOT.iterdir()):
             summary = exp_dir / "metrics_summary.json"
@@ -42,18 +51,57 @@ def collect_summary() -> pd.DataFrame:
             if len(parts) != 3 or not parts[2].startswith("s"):
                 continue
             scenario, strategy, seed_tag = parts
+            if scenario.startswith("smoke"):
+                continue  # module smoke tests, not real experiments
             try:
                 seed = int(seed_tag[1:])
             except ValueError:
                 continue
+            meta_path = exp_dir / RUN_META
+            if not meta_path.exists():
+                unfingerprinted.append(exp_dir.name)
+                if strict:
+                    continue
+                fp = {}
+            else:
+                fp = json.loads(meta_path.read_text(encoding="utf-8"))
             metrics = json.loads(summary.read_text(encoding="utf-8"))
             rows.append({"scenario": scenario, "strategy": strategy, "seed": seed,
-                         "exp_id": exp_dir.name, **metrics})
+                         "exp_id": exp_dir.name, **metrics,
+                         "base_state": fp.get("base_state"),
+                         "base_state_sha1": fp.get("base_state_sha1"),
+                         "model_sha1": fp.get("model_sha1"),
+                         "run_key": fp.get("key"),
+                         "mtime": summary.stat().st_mtime})
+    if unfingerprinted:
+        verb = "dropped" if strict else "kept (--lax)"
+        print(f"[collect] {len(unfingerprinted)} run(s) without {RUN_META} {verb}: "
+              f"{', '.join(unfingerprinted[:6])}"
+              f"{' ...' if len(unfingerprinted) > 6 else ''}")
+
     df = pd.DataFrame(rows)
+    if not df.empty and strict:
+        df = _drop_foreign_base_states(df)
     if not df.empty:
+        df = df.drop(columns=["mtime"]).sort_values(["scenario", "strategy", "seed"])
         ARENA_CSV.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(ARENA_CSV, index=False)
     return df
+
+
+def _drop_foreign_base_states(df: pd.DataFrame) -> pd.DataFrame:
+    """Keep only the base state of the most recent run; report what was dropped."""
+    states = df["base_state_sha1"].dropna().unique()
+    if len(states) <= 1:
+        return df
+    keep = df.loc[df["mtime"].idxmax(), "base_state_sha1"]
+    dropped = df[df["base_state_sha1"] != keep]
+    print(f"[collect] {len(states)} different base TrafficStates found among the "
+          f"results -- they are not comparable. Keeping {keep!r} "
+          f"({df['base_state_sha1'].eq(keep).sum()} runs), dropping "
+          f"{len(dropped)}: {', '.join(sorted(dropped['exp_id'])[:6])}"
+          f"{' ...' if len(dropped) > 6 else ''}")
+    return df[df["base_state_sha1"] == keep].copy()
 
 
 def _agg(df: pd.DataFrame) -> pd.DataFrame:
@@ -190,7 +238,11 @@ def make_figures(df: pd.DataFrame, fig_dir: Path = Path("figures")) -> list[Path
         ax.set_xticks(x)
         ax.set_xticklabels([s.replace("_", "\n") for s in scenarios], fontsize=8)
         ax.set_ylabel("Waiting-time reduction vs Fixed (%)")
-        ax.legend()
+        # value labels sit on top of the bars, so keep the legend out of the axes
+        # and leave headroom -- an in-axes legend collides with the tallest label
+        ax.margins(y=0.16)
+        ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.01), frameon=False,
+                  ncol=len(others))
         made.append(save_fig(fig, fig_dir / "fig_before_after.png"))
 
     return made
@@ -207,13 +259,17 @@ def main() -> None:
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--figures", action="store_true", help="regenerate comparison figures")
     ap.add_argument("--skip-run", action="store_true", help="only collect + figures")
+    ap.add_argument("--lax", action="store_true",
+                    help="also include runs with no run_meta.json provenance "
+                         "(they may come from a different TrafficState)")
     args = ap.parse_args()
 
     scenario_list = list(SCENARIOS) if args.scenarios == "all" else args.scenarios.split(",")
     strategy_list = args.strategies.split(",")
+    failures: list[tuple[str, str, int, str]] = []
+    total = len(scenario_list) * len(strategy_list) * args.seeds
 
     if not args.skip_run:
-        total = len(scenario_list) * len(strategy_list) * args.seeds
         n = 0
         for scenario in scenario_list:
             for strategy in strategy_list:
@@ -227,19 +283,32 @@ def main() -> None:
                         w = info["metrics"].get("avg_waiting_s", float("nan"))
                         tag = "cached" if info["cached"] else "done"
                         print(f"    {tag}: avg_waiting={w:.1f}s", flush=True)
-                    except Exception as e:  # keep batch going, report at end
+                    except Exception as e:  # keep the batch going, report at the end
+                        failures.append((scenario, strategy, seed, str(e)))
                         print(f"    FAILED: {e}", flush=True)
 
-    df = collect_summary()
-    if df.empty:
-        print("No results found.")
-        return
-    print(f"\narena_summary.csv: {len(df)} runs -> {ARENA_CSV}")
-    print(_agg(df).round(2).to_string())
+    df = collect_summary(strict=not args.lax)
+    if not df.empty:
+        print(f"\narena_summary.csv: {len(df)} runs -> {ARENA_CSV}")
+        states = sorted(set(df["base_state"].dropna()))
+        print(f"base TrafficState(s): {', '.join(states) if states else 'unknown'}")
+        print(_agg(df).round(2).to_string())
 
-    if args.figures or not args.skip_run:
-        for p in make_figures(df):
-            print(f"figure: {p}")
+        if args.figures or not args.skip_run:
+            for p in make_figures(df):
+                print(f"figure: {p}")
+    else:
+        print("No results found.")
+
+    # An arena table assembled from a partly-failed batch is not the table that
+    # was asked for; exit non-zero so callers and CI do not treat it as one.
+    if failures:
+        print(f"\n{len(failures)} of {total} runs FAILED:")
+        for scenario, strategy, seed, err in failures:
+            print(f"  - {scenario} / {strategy} / seed {seed}: {err}")
+        raise SystemExit(1)
+    if df.empty:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

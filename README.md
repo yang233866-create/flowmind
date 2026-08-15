@@ -69,6 +69,62 @@ SUMO 由 pip 包 `eclipse-sumo` 提供，无需单独安装；`SUMO_HOME` 由
 `avg_waiting_s`、`avg_travel_time_s`、`throughput_veh`、`avg_queue_veh`、
 `max_queue_veh`、`avg_speed_mps`、`teleports` —— 定义见 `docs/CONTRACTS.md`。
 
+指标对 RL 与基线用同一套 `MetricsCollector` + tripinfo，且都是**每仿真秒**采样一次。
+每次实验会写 `run_meta.json` 记录输入指纹（base TrafficState / 路由 / checkpoint 的
+sha1），`arena_summary.csv` 携带同样的 provenance 列 —— 不同输入产生的运行不会被拼进
+同一张对比表（详见 `docs/DEVLOG.md` 2026-08-14 一节）。
+
+## 实验结果
+
+5 场景 × 4 策略 × 3 seed = **60 次实验**，每次 1800 s 仿真，全部基于同一份
+base TrafficState（`data/traffic_states/demo_001.json`, sha1 `66940bea`）与同一套路由，
+`cross_basic` 模板。下表为 60 次运行按策略聚合的均值±标准差（跨场景，故标准差同时含
+场景间差异）：
+
+| 策略 | avg_waiting_s | avg_travel_time_s | throughput_veh | avg_queue_veh | avg_speed_mps |
+|---|---|---|---|---|---|
+| Fixed-Time | 56.2 ± 4.1 | 102.9 ± 6.0 | 1203 ± 149 | 42.3 ± 6.0 | 4.8 ± 0.4 |
+| Actuated | 46.1 ± 9.6 | **86.8 ± 9.3** | **1354 ± 58** | 40.8 ± 10.8 | **6.1 ± 0.8** |
+| DQN | 31.2 ± 5.1 | 102.8 ± 13.0 | 1287 ± 76 | 22.7 ± 4.1 | 4.0 ± 0.5 |
+| PPO | **30.9 ± 5.4** | 104.5 ± 13.5 | 1261 ± 83 | **22.0 ± 4.3** | 4.0 ± 0.5 |
+
+各场景平均等待时间（s，3 seed 均值）：
+
+| 场景 | Fixed | Actuated | DQN | PPO |
+|---|---|---|---|---|
+| normal | 52.9 | 40.5 | 27.0 | **26.9** |
+| morning_peak | 50.9 | 45.1 | 26.6 | **25.8** |
+| evening_peak | 56.9 | 58.3 | 33.4 | **32.9** |
+| event_surge | 60.7 | 54.0 | **39.7** | 40.1 |
+| lane_closure | 59.9 | 33.0 | 29.0 | 29.0 |
+
+![before/after](figures/fig_before_after.png)
+
+**怎么读这组结果**：
+
+- RL 的优势集中在**等待时间与排队长度**：相对 Fixed-Time 降低 45%（PPO 30.9 s vs
+  56.2 s），平均排队从 42 辆降到 22 辆（-48%），且在 5 个场景上一致；DQN 与 PPO 差距很小。
+- 但 RL **不是全指标最优**。Actuated 的 throughput、行程时间、平均速度都最好；RL 的
+  行程时间与 Fixed 基本持平（104.5 s vs 102.9 s），平均速度明显更低（4.0 vs 4.8 m/s）——
+  RL 用"车辆缓行少停车"换掉了"停车久但通过快"，5 s 决策周期加 3 s 黄灯的频繁相位切换
+  也会吃掉通行时间。要在论文里下"RL 更优"的结论必须指明是哪个指标。
+- 两个 RL 模型只在 normal 需求上训练（100k steps），**泛化能力有限**：`event_surge`
+  下 PPO 的 throughput 1260 低于 Fixed 的 1354，等待时间的相对收益也从 49% 掉到 34%。
+- teleports 全场为 0，说明没有因为拥堵导致的车辆传送，指标可信。
+- 需求来自 21.5 s 的 demo 视频外推，绝对量级仅供功能验证；结论的可比性来自"同一路由、
+  同一采集管线"，而非真实路口标定。
+
+## 测试
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q                    # 全部（含 SUMO 用例）
+.venv/Scripts/python.exe -m pytest -q -m "not sumo"      # 跳过需要真跑 SUMO 的用例
+```
+
+71 个回归测试，重点覆盖会"跑得通但结果错"的路径：路由必须按发车时间有序且需求覆盖整个
+episode、实验缓存必须按输入指纹失效、对比表必须拒绝混来源的运行、界面排名必须裁剪到可比
+子集。
+
 ## 目录结构
 
 ```
@@ -79,6 +135,7 @@ FlowMind/
 ├─ experiments/      # 场景库、批量实验、策略对比
 ├─ app/              # Streamlit 界面
 ├─ scripts/          # 论文图脚本 + sci_style + 流水线
+├─ tests/            # pytest 回归测试（71 个）
 ├─ docs/             # CONTRACTS.md（接口契约）、DEVLOG.md（开发日志）
 ├─ data/             # videos / traffic_states / simulations / results
 ├─ models/           # YOLO 权重、RL checkpoint

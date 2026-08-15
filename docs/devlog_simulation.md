@@ -40,10 +40,17 @@
   每 approach × movement × vType 一条 `<flow>`（rate ≤ 0.01 vph 的组合直接跳过，避免无意义 flow）。
 - vType 参数（长度/加速/最大速度）：car 4.5m/2.6/33.3，bus 12m/1.2/22.2，truck 9m/1.3/25，
   motorcycle 2.2m/3.5/30；vClass 对应 passenger/bus/truck/motorcycle。
-- `flow_profile` 存在时按 `profile_bins_sec` 分箱生成分时段 flow；profile 比 duration 短则末箱值持续到结束；无 profile 用单一 flow 覆盖全时段。
+- `flow_profile` 存在时按 `profile_bins_sec` 分箱生成分时段 flow；**profile 只描述被观测到的那一段时间**，
+  因此分箱被裁剪到 state 的 `duration_sec`（末箱残缺时按真实时长收尾，不按整箱宽度重放），
+  观测窗口之后用该方向的聚合 `flow_vph` 补一条 flow 覆盖到 episode 结束；无 profile 用单一 flow 覆盖全时段。
+  （2026-08-14 修：原先是"末箱值持续到结束"，而视频末箱常常是 0.0，导致 25 s 之后需求全部归零。）
+- **所有 `<flow>` 按 `begin` 升序输出**（先收集再排序）。SUMO 要求路由输入按发车时间有序，
+  乱序元素只警告一次然后被**静默丢弃**；`check_sorted()` / `route_horizon()` 供上游在建环境、
+  开训前显式校验，宁可报错也不要悄悄少放车。
+- duration 优先级：函数参数 `duration_sec`（调用方权威，如 RL 训练 episode 长度）> scenario spec 的
+  duration_sec > state 的 duration_sec > 1800。
 - turning_ratio 缺省 0.15/0.70/0.15，且做归一化防御（和不为 1 时按比例缩放）；vehicle_mix 同样归一化，缺省全 car。
 - lane_closures 不影响路由生成，只透传写进 gen_meta.json（关道由 sumo_runner 在 traci 里做）。
-- duration 优先级：scenario spec 的 duration_sec > state 的 duration_sec > 1800。
 
 ## metrics 设计（重要：接口兼容）
 
@@ -59,8 +66,10 @@
   `MetricsCollector(traci, meta_dict)`（rl_agents 用，tls_id=None 时自动从 meta 提取）。
 - 模块级 `parse_tripinfo(tripinfo_path, timeseries=None, teleports=0.0)`；
   实例方法 `collector.parse_tripinfo(path)` 内部调用模块级函数并带上自己累计的 teleports。
-- **已知限制**：rl_agents 调 `parse_tripinfo(tripinfo, ts)` 不传 teleports，所以 RL 回合的
-  teleports 恒为 0。如需修正，应让 rl_agents 传 `collector.teleports`（需 Opt 模块改）。
+- ~~**已知限制**：rl_agents 调 `parse_tripinfo(tripinfo, ts)` 不传 teleports，RL 回合的
+  teleports 恒为 0。~~ 2026-08-14 已修：`rl_agents` 改调实例方法
+  `collector.parse_tripinfo(tripinfo)`，teleports 与基线同口径累计。当前 arena 60 次实验
+  teleports 全为 0 是真实结果（`time_to_teleport=300` 未被触发），不再是采集缺口。
 
 采集口径：
 

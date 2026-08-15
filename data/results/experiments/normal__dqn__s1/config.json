@@ -1,0 +1,9 @@
+{
+  "template": "cross_basic",
+  "route_file": "C:\\Users\\y\\FlowMind\\data\\results\\experiments\\normal__dqn__s1\\routes.rou.xml",
+  "strategy": "dqn",
+  "seed": 1,
+  "duration_sec": 1800,
+  "lane_closures": [],
+  "gui": false
+}

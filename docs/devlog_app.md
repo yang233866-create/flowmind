@@ -23,7 +23,8 @@ app/
 
 ### Home（Dashboard）
 - Hero 横幅（NPG 渐变）+ 五节点数据流架构卡片（视频感知 → TrafficState → SUMO 孪生 → 策略竞技场 → What-if），带各页快捷链接。
-- 四张指标卡：TrafficState 数 / 已完成实验数 / 最佳策略（arena_summary.csv 中平均 `avg_waiting_s` 最低者）/ 相对 Fixed-Time 的等待时间改善百分比。
+- 四张指标卡：TrafficState 数 / 已完成实验数 / 最佳策略 / 相对 Fixed-Time 的等待时间改善百分比。
+- **排名口径（2026-08-14 修）**：「最佳策略」不再直接对 `arena_summary.csv` 全表求均值，而是先经 `common.comparable_panel()` 裁剪到"同一 base TrafficState + 每个策略都跑过的 (场景, seed) 组合"子集；被剔除的部分以 caption 说明。否则只跑了简单场景的策略会凭构造夺冠，跨 TrafficState 的运行也会被混进同一个平均值。
 - 最近实验表（arena_summary.csv 尾部 10 行，倒序，策略名中文化）。
 - `figures/` PNG 画廊（按修改时间倒序，3 列网格）。
 
@@ -43,7 +44,7 @@ app/
 - 场景来源三级兜底：`experiments.scenarios` 注册表（try/except import，尝试 SCENARIOS/REGISTRY 等常见命名）→ `data/results/scenario_specs/*.json` → 扫描 experiments 目录解析 `<scenario>__<strategy>__s<seed>`。
 - 「一键对比」→ `python -m experiments.strategy_compare --template ... --scenarios <sel|all> --strategies ... --seeds N`。
 - 结果区（读 arena_summary.csv，支持按场景过滤）：
-  - 排名卡（🥇🥈🥉，按平均等待时间，非 fixed 策略附 "vs Fixed" 改善 delta）；
+  - 排名卡（🥇🥈🥉，按平均等待时间，非 fixed 策略附 "vs Fixed" 改善 delta）；排名同样走 `comparable_panel()` 的可比子集，卡片下方注明剔除原因（面板不平衡 / 混入其它 base TrafficState）；
   - 策略×指标透视表（每列最优值绿底加粗，方向感知：throughput/speed 越大越好）；
   - 每指标一个 tab 的柱状图，误差棒 = seed 间 std，柱色 = 契约策略固定色；
   - Before/After 表：各策略相对 fixed 的逐指标改善百分比（绿正红负）。

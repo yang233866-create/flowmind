@@ -1,0 +1,10 @@
+{
+  "template": "cross_basic",
+  "route_file": "C:\\Users\\y\\FlowMind\\data\\results\\experiments\\normal__actuated__s1\\routes.rou.xml",
+  "strategy": "actuated",
+  "seed": 1,
+  "duration_sec": 1800,
+  "lane_closures": [],
+  "closed_lanes": [],
+  "gui": false
+}

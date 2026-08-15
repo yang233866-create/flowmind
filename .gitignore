@@ -1,11 +1,78 @@
+# ---- Python / 虚拟环境 ----
 .venv/
 __pycache__/
 *.pyc
-install_*.log
-data/videos/*.mp4
-data/videos/*.avi
-models/*.pt
-data/results/tb/
-data/simulations/
 *.egg-info/
+.pytest_cache/
+
+# ---- 日志 ----
+install_*.log
+train_*.log
+*.log
+
+# ---- 临时文件 ----
+tmp_*
+_tmp_*
+
+# ---- Streamlit 本地配置（含密钥，务必排除）----
 .streamlit/
+.superpowers/
+
+# ---- 模型权重（大体积）----
+models/*.pt
+models/*.zip
+models/*.train.json
+
+# ---- 视频（大体积）----
+data/videos/
+
+# ---- SUMO 仿真产物（大体积）----
+data/simulations/
+data/results/tb/
+data/results/_reward_compare/
+data/results/vision/
+data/results/scenario_specs/
+
+# ---- 根目录备份 / 临时目录 ----
+_backup_prerun_*/
+_*/
+
+# ---- figures 论文图（目录内只有 PNG，画廊需要展示，无需忽略）----
+
+# =====================================================================
+# 实验结果：只保留 normal 场景的最小示例数据（让 demo 页面有内容），
+# 其余场景 + 大产物（tripinfo/routes）全部排除。
+# 注意：`!` 恢复父目录会连带放弃整目录忽略，因此必须显式再忽略非 normal 场景。
+# =====================================================================
+
+data/results/experiments/
+
+# 恢复 arena_summary.csv（竞技场页核心数据源）
+!data/results/arena_summary.csv
+
+# 恢复 traffic_states（数字孪生/场景实验室需要 TrafficState）
+!data/traffic_states/
+!data/traffic_states/*.json
+
+# 恢复 experiments 目录本身，再只保留 normal__ 前缀
+!data/results/experiments/
+
+# 显式忽略所有非 normal 场景 + 大产物
+data/results/experiments/evening_peak__*/
+data/results/experiments/event_surge__*/
+data/results/experiments/morning_peak__*/
+data/results/experiments/lane_closure__*/
+data/results/experiments/smoke_*/
+
+# normal 场景：忽略大产物（tripinfo/routes/sumocfg），保留小描述文件
+data/results/experiments/normal__*/routes.rou.xml
+data/results/experiments/normal__*/tripinfo.xml
+data/results/experiments/normal__*/episode.sumocfg
+
+# normal 场景：保留描述性小文件
+!data/results/experiments/normal__*/metrics_summary.json
+!data/results/experiments/normal__*/timeseries.csv
+!data/results/experiments/normal__*/config.json
+!data/results/experiments/normal__*/gen_meta.json
+!data/results/experiments/normal__*/run_meta.json
+!data/results/experiments/normal__*/scenario_spec.json

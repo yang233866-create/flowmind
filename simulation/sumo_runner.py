@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from simulation.metrics import MetricsCollector
-from simulation.route_generator import load_meta
+from simulation.route_generator import check_sorted, load_meta
 from simulation.sumo_home import ensure_sumo_home, sumo_binary, use_libsumo
 
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -84,6 +84,9 @@ def run_episode(template: str, route_file: str | Path, strategy: str, seed: int,
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     route_file = Path(route_file).resolve()
+    # SUMO drops out-of-order route elements with a warning only; refuse to
+    # produce metrics that would silently describe a fraction of the demand.
+    check_sorted(route_file)
 
     if strategy in ("dqn", "ppo"):
         try:

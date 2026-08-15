@@ -207,6 +207,45 @@ def arena_metric_cols(df: pd.DataFrame) -> list[str]:
     return [k for k in METRIC_LABELS if k in df.columns]
 
 
+def comparable_panel(df: pd.DataFrame, group: str = "strategy",
+                     cells: tuple[str, ...] = ("scenario", "seed"),
+                     ) -> tuple[pd.DataFrame, list[str]]:
+    """把 arena 表裁剪成"可以互相排名"的子集，并说明剔除了什么。
+
+    两件事会让"按平均等待时间排名"变得没有意义：
+    1) 面板不平衡 —— 只跑了简单场景的策略会凭构造获胜；
+    2) 来源混杂 —— 不同 TrafficState 生成的运行本来就不可比。
+    返回 (可用子集, 提示信息列表)。
+    """
+    notes: list[str] = []
+    if df is None or df.empty or group not in df.columns:
+        return df, notes
+
+    if "base_state_sha1" in df.columns and df["base_state_sha1"].notna().any():
+        shas = sorted(df["base_state_sha1"].dropna().unique())
+        if len(shas) > 1:
+            keep = df["base_state_sha1"].value_counts().idxmax()
+            notes.append(f"发现 {len(shas)} 个不同的基准 TrafficState，"
+                         f"仅保留 `{str(keep)[:8]}`（其余不可比）")
+            df = df[df["base_state_sha1"] == keep]
+
+    key = [c for c in cells if c in df.columns]
+    if key and not df.empty:
+        n_groups = df[group].nunique(dropna=True)
+        per_cell = df.groupby(key)[group].nunique()
+        full = {t if isinstance(t, tuple) else (t,)
+                for t in per_cell[per_cell == n_groups].index}
+        if len(full) < len(per_cell):
+            notes.append(f"{len(per_cell) - len(full)} 个 {'/'.join(key)} 组合"
+                         f"缺少部分策略，已从排名中剔除（保证同条件对比）")
+            if full:
+                mask = df[key].apply(lambda r: tuple(r) in full, axis=1)
+                df = df[mask]
+            else:
+                df = df.iloc[0:0]
+    return df, notes
+
+
 _EXP_ID_RE = re.compile(r"^(?P<scenario>.+)__(?P<strategy>[A-Za-z0-9]+)__s(?P<seed>\d+)$")
 
 

@@ -13,8 +13,8 @@ import streamlit as st
 
 from app.common import (
     ARENA_CSV, FIGURES_DIR, METRIC_LABELS, STRATEGY_LABELS,
-    arena_metric_cols, empty_state, improvement_pct, list_experiments,
-    load_arena, load_states, page_setup, safe_page_link,
+    arena_metric_cols, comparable_panel, empty_state, improvement_pct,
+    list_experiments, load_arena, load_states, page_setup, safe_page_link,
 )
 
 page_setup("Dashboard", "🚦")
@@ -69,9 +69,13 @@ arena = load_arena()
 best_name = None
 best_wait = None
 impr_vs_fixed = None
+rank_notes: list[str] = []
 if arena is not None and "strategy" in arena.columns and "avg_waiting_s" in arena.columns:
-    mean_wait = arena.groupby("strategy")["avg_waiting_s"].mean().dropna()
-    if len(mean_wait):
+    # 只在"每个策略都跑过"的场景/种子子集上排名，否则跳过难场景的策略会白赢
+    panel, rank_notes = comparable_panel(arena)
+    mean_wait = panel.groupby("strategy")["avg_waiting_s"].mean().dropna() \
+        if not panel.empty else pd.Series(dtype=float)
+    if len(mean_wait) > 1:
         best_name = mean_wait.idxmin()
         best_wait = float(mean_wait.min())
         if "fixed" in mean_wait.index:
@@ -86,11 +90,14 @@ c3.metric("🏆 最佳策略",
           STRATEGY_LABELS.get(best_name, best_name) if best_name else "—",
           delta=f"平均等待 {best_wait:.1f} s" if best_wait is not None else None,
           delta_color="off",
-          help="按 arena_summary.csv 中平均等待时间最低者", border=True)
+          help="在所有策略都跑过的场景/种子上，平均等待时间最低者", border=True)
 c4.metric("⚡ 相对 Fixed-Time 改善",
           f"{impr_vs_fixed:+.1f}%" if impr_vs_fixed is not None else "—",
           delta="等待时间下降" if impr_vs_fixed and impr_vs_fixed > 0 else None,
           help="最佳策略平均等待时间相对 Fixed-Time 的改善", border=True)
+
+for note in rank_notes:
+    st.caption(f"⚠️ 排名口径：{note}")
 
 # ---------------------------------------------------------------- 最近实验
 

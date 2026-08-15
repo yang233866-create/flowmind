@@ -8,5 +8,5 @@
   },
   "lane_closures": [],
   "duration_sec": 1800,
-  "base_state": "data/traffic_states/synthetic_demo.json"
+  "base_state": "data\\traffic_states\\demo_001.json"
 }

@@ -1,0 +1,18 @@
+{
+  "base_state": "data\\traffic_states\\demo_001.json",
+  "base_state_sha1": "73f107e7e250cdb7",
+  "flow_multipliers": {
+    "north": 1.0,
+    "south": 1.0,
+    "east": 1.0,
+    "west": 1.0
+  },
+  "lane_closures": [],
+  "duration_sec": 1800,
+  "template": "cross_basic",
+  "strategy": "dqn",
+  "seed": 0,
+  "model_sha1": "ad4cff2c837fa927",
+  "key": "36a1b9c785d5238f",
+  "route_sha1": "9b371d938937a81e"
+}

@@ -15,7 +15,7 @@ import streamlit as st
 from app.common import (
     METRIC_HIGHER_BETTER, METRIC_INT, METRIC_LABELS, PYTHON, STRATEGIES,
     STRATEGY_COLORS, STRATEGY_LABELS, TEMPLATE_LABELS, TEMPLATES,
-    arena_metric_cols, empty_state, fmt_metric, improvement_pct,
+    arena_metric_cols, comparable_panel, empty_state, fmt_metric, improvement_pct,
     known_scenarios, load_arena, page_setup, run_cli, style_fig,
 )
 
@@ -86,14 +86,19 @@ std_df = grp.std().reindex(present)
 n_runs = flt.groupby("strategy").size().reindex(present)
 
 # ---- 排名卡片（按平均等待时间）
-if "avg_waiting_s" in mean_df.columns:
-    order = mean_df["avg_waiting_s"].sort_values().index.tolist()
+# 排名只在"每个策略都跑过"的场景/种子子集上进行：只跑了简单场景的策略
+# 会凭构造赢下总均值，不同 TrafficState 生成的运行本来也不可比。
+rank_df, rank_notes = comparable_panel(flt)
+if "avg_waiting_s" in mean_df.columns and not rank_df.empty:
+    rank_mean = rank_df.groupby("strategy")[metric_cols].mean()
+    rank_n = rank_df.groupby("strategy").size()
+    order = [s for s in rank_mean["avg_waiting_s"].sort_values().index if s in present]
     medals = ["🥇", "🥈", "🥉", "4️⃣"]
     st.markdown("**策略排名（按平均等待时间）**")
-    cols = st.columns(len(order))
-    fixed_wait = mean_df.loc["fixed", "avg_waiting_s"] if "fixed" in mean_df.index else None
+    cols = st.columns(len(order)) if order else []
+    fixed_wait = rank_mean.loc["fixed", "avg_waiting_s"] if "fixed" in rank_mean.index else None
     for col, (rank, s) in zip(cols, enumerate(order)):
-        wait = mean_df.loc[s, "avg_waiting_s"]
+        wait = rank_mean.loc[s, "avg_waiting_s"]
         delta = None
         if fixed_wait is not None and s != "fixed":
             pct = improvement_pct(wait, fixed_wait, "avg_waiting_s")
@@ -103,7 +108,12 @@ if "avg_waiting_s" in mean_df.columns:
                    f"{wait:.2f} s",
                    delta=delta or ("基准 Baseline" if s == "fixed" else None),
                    delta_color="normal" if delta else "off",
-                   help=f"{int(n_runs[s])} 次运行的均值", border=True)
+                   help=f"{int(rank_n[s])} 次同条件运行的均值", border=True)
+    for note in rank_notes:
+        st.caption(f"⚠️ 排名口径：{note}")
+elif "avg_waiting_s" in mean_df.columns:
+    st.warning("没有任何场景/种子被全部策略跑过，无法给出可比排名。"
+               "请补齐缺失的运行后再看排名。")
 
 # ---- 透视表（条件着色：每个指标最优加粗标绿）
 st.markdown("**策略 × 指标透视表**（均值，绿色 = 该指标最优）")

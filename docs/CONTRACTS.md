@@ -131,13 +131,29 @@ queue_total, waiting_total, running_veh, phase`（每仿真秒一行）。
 data/results/experiments/<exp_id>/     # exp_id = <scenario>__<strategy>__s<seed>
   config.json          # 场景+策略+seed+sim 参数
   metrics_summary.json # metrics dict
-  timeseries.csv
+  run_meta.json        # 输入指纹（见下），跑成功后才写
+  timeseries.csv       # 每仿真秒一行（基线与 RL 一致）
   tripinfo.xml
 data/results/arena_summary.csv         # 所有实验汇总（一行一实验）
 data/results/tb/                       # TensorBoard 日志
 models/<strategy>_<template>.zip       # SB3 checkpoint
 figures/                               # 论文图，PNG，DPI>=300
 ```
+
+**`run_meta.json`（实验身份，`experiments.scenario_runner.run_fingerprint`）**：
+`base_state` + `base_state_sha1`、`flow_multipliers`、`lane_closures`、`duration_sec`、
+`template`、`strategy`、`seed`、`model_sha1`（RL 策略才有）、`route_sha1`，以及它们的
+哈希 `key`。目录名只编码 `(scenario, strategy, seed)`，**不足以标识一次运行**：缓存命中
+必须比对 `key`，不一致就重跑。
+
+`arena_summary.csv` 除指标列外必须携带 provenance 列
+`base_state, base_state_sha1, model_sha1, run_key`；缺 `run_meta.json` 的运行默认不进表
+（`strategy_compare --lax` 才保留），不同 `base_state_sha1` 的运行不可同表比较。
+
+**路由文件约定**：`<flow>`/`<vehicle>` 必须按 `begin`/`depart` 升序排列，且需求要覆盖到
+episode 结束。SUMO 对乱序元素只警告一次然后静默丢弃，对提前断供无任何提示 ——
+两者都会让运行"成功"但结果无效。生产方是 `simulation.route_generator`，
+消费方（`make_env` / `train_common`）用 `check_sorted()` 与 `route_horizon()` 显式校验。
 
 ## RL 约定（optimization/）
 
@@ -147,7 +163,11 @@ figures/                               # 论文图，PNG，DPI>=300
   --route <rou.xml> --timesteps 100000`；PPO 同理。checkpoint 存
   `models/dqn_cross_basic.zip`；TensorBoard 到 `data/results/tb/`。
 - 评估时 RL 用与训练一致的 obs 计算（通过 sumo-rl env 跑评估回合），
-  但指标采集必须与 fixed/actuated 相同（MetricsCollector + tripinfo）。
+  但指标采集必须与 fixed/actuated 相同（MetricsCollector + tripinfo），
+  且**采样频率也必须相同**：`env.step()` 一次推进 `delta_time=5` 秒，所以要挂
+  `env._sumo_step` 每仿真秒采一次，否则 `max_queue_veh` 偏低、teleports 漏计。
+- 训练前必须校验路由文件：有序（`check_sorted`）且 `route_horizon >= --episode-sec`。
+  在空路口上训练时 diff-waiting-time 奖励恒为 0，日志看不出任何异常。
 
 ## 图表
 

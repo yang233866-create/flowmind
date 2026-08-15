@@ -1,0 +1,9 @@
+{
+  "avg_waiting_s": 42.94835007173601,
+  "avg_travel_time_s": 84.19081779053084,
+  "throughput_veh": 1394.0,
+  "avg_queue_veh": 35.99444444444445,
+  "max_queue_veh": 64.0,
+  "avg_speed_mps": 6.086204640663147,
+  "teleports": 0.0
+}

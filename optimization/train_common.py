@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -22,6 +23,9 @@ def build_arg_parser(algo: str) -> argparse.ArgumentParser:
                     help="use libsumo backend (faster); default on")
     ap.add_argument("--no-libsumo", dest="libsumo", action="store_false")
     ap.add_argument("--device", default="auto")
+    ap.add_argument("--reward-fn", default=None,
+                    help="reward function name (default diff-waiting-time). "
+                         "Custom ones are registered via rl_agents.register_reward_fn().")
     return ap
 
 
@@ -29,7 +33,22 @@ def train(algo: str, args: argparse.Namespace) -> Path:
     from stable_baselines3 import DQN, PPO
     from stable_baselines3.common.monitor import Monitor
 
-    save_path = model_path(algo, args.template)
+    from simulation.route_generator import check_sorted, route_horizon
+
+    # A route file whose flows stop before the episode does means the agent
+    # spends the remainder of every episode on an empty intersection, where the
+    # diff-waiting-time reward is exactly 0 -- the cause of a flat ep_rew_mean.
+    check_sorted(args.route)
+    horizon = route_horizon(args.route)
+    if horizon + 1 < args.episode_sec:
+        raise SystemExit(
+            f"[train_{algo}] route file only supplies demand up to t={horizon:.0f}s "
+            f"but --episode-sec is {args.episode_sec}. Regenerate with "
+            f"`python -m simulation.route_generator --duration {args.episode_sec} ...` "
+            "or lower --episode-sec."
+        )
+
+    save_path = model_path(algo, args.template, reward_fn=args.reward_fn)
     save_path.parent.mkdir(parents=True, exist_ok=True)
     tb_dir = TB_ROOT / f"{algo}_{args.template}"
     tb_dir.mkdir(parents=True, exist_ok=True)
@@ -38,6 +57,8 @@ def train(algo: str, args: argparse.Namespace) -> Path:
         args.template, args.route,
         duration_sec=args.episode_sec, seed=args.seed,
         use_libsumo=args.libsumo,
+        sumo_warnings=False,  # 100k steps of teleport warnings; routes checked above
+        reward_fn=args.reward_fn,
     )
     env = Monitor(env)
 
@@ -86,9 +107,12 @@ def train(algo: str, args: argparse.Namespace) -> Path:
 
     info = {
         "algo": algo, "template": args.template, "route": str(args.route),
+        "route_horizon_sec": horizon,
+        "route_sha1": hashlib.sha1(Path(args.route).read_bytes()).hexdigest()[:16],
         "timesteps": args.timesteps, "episode_sec": args.episode_sec,
         "seed": args.seed, "libsumo": args.libsumo,
-        "env_kwargs": ENV_KWARGS, "train_seconds": round(elapsed, 1),
+        "reward_fn": args.reward_fn, "env_kwargs": ENV_KWARGS,
+        "train_seconds": round(elapsed, 1),
         "checkpoint": str(save_path),
     }
     meta_path = save_path.with_suffix(".train.json")
