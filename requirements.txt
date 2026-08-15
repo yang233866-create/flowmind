@@ -1,12 +1,12 @@
 # FlowMind AI - dependency manifest (Streamlit Community Cloud, slim)
-# Static-display deployment only: page rendering does NOT require SUMO / RL / YOLO.
-# Heavy deps (eclipse-sumo, libsumo, torch, ultralytics, stable-baselines3) are
-# intentionally omitted — they cannot install/import in Community Cloud containers.
+# Static-display deployment: page rendering requires none of SUMO / RL / YOLO.
+# Heavy deps (eclipse-sumo, libsumo, torch, ultralytics, stable-baselines3,
+# opencv-python-headless) are omitted — they cannot install/import in
+# Community Cloud containers, and none are imported at page-render time.
 
 streamlit>=1.40
 plotly>=5.24
 pandas>=2.2
 matplotlib>=3.9
 seaborn>=0.13
-opencv-python-headless>=4.10
 Pillow
