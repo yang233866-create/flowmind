@@ -171,6 +171,13 @@ def empty_state(message: str, link: str | None = None, link_label: str = "") -> 
 
 # ---------------------------------------------------------------- 数据读取
 
+def cv2_available() -> bool:
+    """OpenCV 是否可用。云展示版不装 opencv，视频页据此优雅降级。"""
+    from importlib.util import find_spec
+
+    return find_spec("cv2") is not None
+
+
 def load_json(path: Path) -> dict | None:
     try:
         return json.loads(Path(path).read_text(encoding="utf-8"))
@@ -378,3 +385,99 @@ def style_fig(fig, height: int = 380, title: str | None = None, unified_hover: b
     fig.update_xaxes(showgrid=False, zeroline=False)
     fig.update_yaxes(gridcolor="rgba(60,84,136,.15)", zeroline=False)
     return fig
+
+
+# ---------------------------------------------------------------- 视频分析结果展示
+
+def render_vision_state(state: dict, scenario_id: str, video_path: Path | None = None):
+    """渲染一份 TrafficState 的分析结果（流量卡片 / 车型构成 / 转向表 / 时序 / 视频）。
+
+    纯展示函数：不依赖 OpenCV/YOLO，云端展示版与本地完整版共用。
+    video_path 仅用于 st.video 播放标注视频，为 None 时跳过该块。
+    """
+    import plotly.graph_objects as go
+
+    approaches = state.get("approaches", {})
+    src = state.get("source", {})
+
+    # 顶部说明（隐藏本地源视频的绝对路径，云端不存在）
+    _src = {k: v for k, v in src.items() if k != "video"}
+    cap = f"scenario_id=`{state.get('scenario_id', scenario_id)}` · schema {state.get('schema_version', '?')}"
+    if _src:
+        cap += " · 时长 {:.2f} s".format(state.get("duration_sec", 0.0)) if state.get("duration_sec") else ""
+        cap += " · 分析时间 {}".format(_src.get("analyzed_at", "?"))
+    st.caption(cap)
+
+    mcols = st.columns(4)
+    for col, d in zip(mcols, DIRECTIONS):
+        a = approaches.get(d, {}) or {}
+        flow = a.get("flow_vph")
+        observed = a.get("observed", False)
+        col.metric(
+            f"{'🟢' if observed else '⚪'} {DIRECTION_LABELS[d]}",
+            f"{flow:,.0f} vph" if isinstance(flow, (int, float)) else "—",
+            delta=None if observed else "未观测（默认/对侧值）",
+            delta_color="off",
+            help=f"排队估计: {a.get('queue_est', '—')} veh", border=True,
+        )
+
+    chart_col, table_col = st.columns([3, 2])
+    with chart_col:
+        fig = go.Figure()
+        for i, vt in enumerate(list(VEHICLE_LABELS)):
+            fig.add_bar(
+                x=[DIRECTION_LABELS[d] for d in DIRECTIONS],
+                y=[(approaches.get(d, {}).get("vehicle_mix") or {}).get(vt, 0) * 100
+                   for d in DIRECTIONS],
+                name=f"{VEHICLE_LABELS[vt]} {vt}",
+                marker=dict(color=NPG[i % len(NPG)], line=dict(color="#ffffff", width=1)),
+            )
+        fig.update_layout(barmode="stack", yaxis_title="构成占比 (%)")
+        st.plotly_chart(style_fig(fig, height=360, title="各进口道车型构成"), width="stretch")
+    with table_col:
+        rows = []
+        for d in DIRECTIONS:
+            a = approaches.get(d, {}) or {}
+            tr = (state.get("turning_ratio") or {}).get(d, {}) or {}
+            rows.append({
+                "进口道": DIRECTION_LABELS[d],
+                "流量 (vph)": a.get("flow_vph"),
+                "排队估计 (veh)": a.get("queue_est"),
+                "左转": tr.get("left"), "直行": tr.get("straight"), "右转": tr.get("right"),
+                "观测": "✔" if a.get("observed") else "—",
+            })
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        st.caption("转向比缺省 0.15 / 0.70 / 0.15（契约默认值）")
+
+    profile = state.get("flow_profile") or {}
+    bins_sec = state.get("profile_bins_sec") or 300
+    if any(profile.get(d) for d in DIRECTIONS):
+        fig = go.Figure()
+        for d in DIRECTIONS:
+            ys = profile.get(d) or []
+            if ys:
+                fig.add_scatter(
+                    x=[i * bins_sec / 60 for i in range(len(ys))], y=ys,
+                    mode="lines+markers", name=DIRECTION_LABELS[d],
+                    line=dict(color=DIRECTION_COLORS[d], width=2), marker=dict(size=8),
+                )
+        fig.update_layout(xaxis_title=f"时间 (min, 每 {bins_sec}s 一档)", yaxis_title="流量 (vph)")
+        st.plotly_chart(style_fig(fig, height=340, title="流量随时间变化", unified_hover=True),
+                        width="stretch")
+
+    with st.expander("📄 原始 TrafficState JSON"):
+        st.json(state)
+
+    if video_path is not None and Path(video_path).exists():
+        st.markdown("**🎬 标注视频**")
+        st.video(str(video_path))
+
+    vision_figs = sorted(FIGURES_DIR.glob("*.png")) if FIGURES_DIR.exists() else []
+    vision_figs = [p for p in vision_figs
+                   if scenario_id.lower() in p.stem.lower() or "vision" in p.stem.lower()]
+    if vision_figs:
+        st.markdown("**📈 视频分析图表**")
+        cols = st.columns(min(3, len(vision_figs)))
+        for col, p in zip(cols * (len(vision_figs) // 3 + 1), vision_figs):
+            with col:
+                st.image(str(p), caption=p.name, width="stretch")

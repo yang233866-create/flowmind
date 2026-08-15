@@ -9,19 +9,33 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
 from app.common import (
-    DIRECTION_COLORS, DIRECTION_LABELS, DIRECTIONS, FIGURES_DIR, NPG, PYTHON,
-    STATES_DIR, VEHICLE_LABELS, VIDEOS_DIR, VISION_OUT_DIR,
-    empty_state, load_json, page_setup, run_cli, style_fig,
+    DIRECTION_COLORS, DIRECTIONS, NPG, PYTHON,
+    STATES_DIR, VIDEOS_DIR, VISION_OUT_DIR,
+    cv2_available, empty_state, load_json, page_setup, render_vision_state,
+    run_cli,
 )
 
 page_setup("Traffic Vision 视频感知", "🎥")
 st.title("🎥 Traffic Vision · 视频感知")
 st.caption("上传路口视频 → 配置 ROI / 计数线 → 运行 `vision.analyze` → 生成 TrafficState（schema 1.1）")
+
+# 云展示版不装 OpenCV/YOLO：不渲染上传/分析控件，展示本地预生成的 demo 分析结果。
+if not cv2_available():
+    st.info(
+        "🚧 此为静态展示版，未安装视频分析依赖（OpenCV / YOLO）。"
+        "以下展示的是本地已预生成的 `demo` TrafficState 分析结果；"
+        "上传视频 + 运行分析需在本地完整环境体验。",
+    )
+    demo_state = load_json(STATES_DIR / "demo.json")
+    if demo_state is not None:
+        st.subheader("📼 预生成分析结果 · demo")
+        render_vision_state(demo_state, "demo")
+    else:
+        st.warning("未找到预生成的 demo TrafficState。")
+    st.stop()
 
 VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv"}
 
@@ -189,86 +203,4 @@ state = load_json(state_out)
 if state is None:
     empty_state(f"尚未生成 `{state_out.relative_to(_ROOT)}`。配置计数线后点击「开始分析」。")
 else:
-    src = state.get("source", {})
-    st.caption(
-        f"scenario_id=`{state.get('scenario_id', '?')}` · schema {state.get('schema_version', '?')} · "
-        f"时长 {state.get('duration_sec', '?')} s · 分析时间 {src.get('analyzed_at', '?')}"
-    )
-    approaches = state.get("approaches", {})
-
-    mcols = st.columns(4)
-    for col, d in zip(mcols, DIRECTIONS):
-        a = approaches.get(d, {}) or {}
-        flow = a.get("flow_vph")
-        observed = a.get("observed", False)
-        col.metric(
-            f"{'🟢' if observed else '⚪'} {DIRECTION_LABELS[d]}",
-            f"{flow:,.0f} vph" if isinstance(flow, (int, float)) else "—",
-            delta=None if observed else "未观测（默认/对侧值）",
-            delta_color="off",
-            help=f"排队估计: {a.get('queue_est', '—')} veh", border=True,
-        )
-
-    chart_col, table_col = st.columns([3, 2])
-    with chart_col:
-        fig = go.Figure()
-        veh_types = list(VEHICLE_LABELS)
-        for i, vt in enumerate(veh_types):
-            fig.add_bar(
-                x=[DIRECTION_LABELS[d] for d in DIRECTIONS],
-                y=[(approaches.get(d, {}).get("vehicle_mix") or {}).get(vt, 0) * 100
-                   for d in DIRECTIONS],
-                name=f"{VEHICLE_LABELS[vt]} {vt}",
-                marker=dict(color=NPG[i % len(NPG)], line=dict(color="#ffffff", width=1)),
-            )
-        fig.update_layout(barmode="stack", yaxis_title="构成占比 (%)")
-        st.plotly_chart(style_fig(fig, height=360, title="各进口道车型构成"), width="stretch")
-    with table_col:
-        rows = []
-        for d in DIRECTIONS:
-            a = approaches.get(d, {}) or {}
-            tr = (state.get("turning_ratio") or {}).get(d, {}) or {}
-            rows.append({
-                "进口道": DIRECTION_LABELS[d],
-                "流量 (vph)": a.get("flow_vph"),
-                "排队估计 (veh)": a.get("queue_est"),
-                "左转": tr.get("left"), "直行": tr.get("straight"), "右转": tr.get("right"),
-                "观测": "✔" if a.get("observed") else "—",
-            })
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        st.caption("转向比缺省 0.15 / 0.70 / 0.15（契约默认值）")
-
-    profile = state.get("flow_profile") or {}
-    bins_sec = state.get("profile_bins_sec") or 300
-    if any(profile.get(d) for d in DIRECTIONS):
-        fig = go.Figure()
-        for d in DIRECTIONS:
-            ys = profile.get(d) or []
-            if ys:
-                fig.add_scatter(
-                    x=[i * bins_sec / 60 for i in range(len(ys))], y=ys,
-                    mode="lines+markers", name=DIRECTION_LABELS[d],
-                    line=dict(color=DIRECTION_COLORS[d], width=2), marker=dict(size=8),
-                )
-        fig.update_layout(xaxis_title=f"时间 (min, 每 {bins_sec}s 一档)", yaxis_title="流量 (vph)")
-        st.plotly_chart(style_fig(fig, height=340, title="流量随时间变化", unified_hover=True),
-                        width="stretch")
-
-    with st.expander("📄 原始 TrafficState JSON"):
-        st.json(state)
-
-    if annotated_out.exists():
-        st.markdown("**🎬 标注视频**")
-        st.video(str(annotated_out))
-        st.caption("若浏览器无法播放（编码为 mp4v），可在本地播放器打开："
-                   f"`{annotated_out.relative_to(_ROOT)}`")
-
-    vision_figs = sorted(FIGURES_DIR.glob("*.png")) if FIGURES_DIR.exists() else []
-    vision_figs = [p for p in vision_figs
-                   if scenario_id.lower() in p.stem.lower() or "vision" in p.stem.lower()]
-    if vision_figs:
-        st.markdown("**📈 视频分析图表**")
-        cols = st.columns(min(3, len(vision_figs)))
-        for col, p in zip(cols * (len(vision_figs) // 3 + 1), vision_figs):
-            with col:
-                st.image(str(p), caption=p.name, width="stretch")
+    render_vision_state(state, scenario_id, video_path=annotated_out if annotated_out.exists() else None)
