@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 import numpy as np
 import pytest
@@ -14,6 +14,7 @@ from scripts.promote_vision_evidence import (
     main,
     promote_vision_evidence,
     semantic_differences,
+    sha256_tree,
     snapshot_protected_data,
     traffic_state_semantic_view,
     verify_protected_data,
@@ -188,6 +189,56 @@ def test_traffic_state_semantic_view_is_the_exact_scientific_projection() -> Non
         "profile_bins_sec": 5,
         "source": {"fps": 10, "frames": 10, "duration_sec": 1},
     }
+
+
+@pytest.mark.parametrize(
+    ("function", "path_parameters"),
+    [
+        (sha256_tree, ("path",)),
+        (snapshot_protected_data, ("root",)),
+        (verify_protected_data, ("root",)),
+        (
+            promote_vision_evidence,
+            (
+                "root",
+                "candidate_state_path",
+                "candidate_frame_path",
+                "candidate_meta_path",
+            ),
+        ),
+    ],
+)
+def test_public_path_parameters_have_exact_path_annotations(
+    function: Any,
+    path_parameters: tuple[str, ...],
+) -> None:
+    hints = get_type_hints(function)
+
+    assert {parameter: hints[parameter] for parameter in path_parameters} == {
+        parameter: Path for parameter in path_parameters
+    }
+
+
+@pytest.mark.parametrize(
+    "missing_path",
+    [
+        ("source", "frames"),
+        ("approaches", "north", "flow_vph"),
+    ],
+)
+def test_semantic_comparison_rejects_mutually_missing_required_field(
+    missing_path: tuple[object, ...],
+) -> None:
+    reference = _state()
+    candidate = copy.deepcopy(reference)
+    for value in (reference, candidate):
+        target = value
+        for component in missing_path[:-1]:
+            target = target[component]
+        target.pop(missing_path[-1])
+
+    with pytest.raises(KeyError, match=str(missing_path[-1])):
+        semantic_differences(reference, candidate)
 
 
 def test_semantic_differences_ignore_run_identity_and_provenance_paths() -> None:

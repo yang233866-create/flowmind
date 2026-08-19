@@ -19,47 +19,46 @@ PROTECTED_FILES = (
 )
 PROTECTED_TREES = ("data/results/experiments",)
 
-_DIRECTIONS = ("north", "south", "east", "west")
-_APPROACH_FIELDS = ("observed", "flow_vph", "queue_est", "vehicle_mix")
-_SOURCE_FIELDS = ("fps", "frames", "duration_sec")
-
-
-def _selected_fields(
-    value: Any,
-    fields: Sequence[str],
-) -> Any:
-    if not isinstance(value, Mapping):
-        return value
-    return {field: value[field] for field in fields if field in value}
-
 
 def traffic_state_semantic_view(state: Mapping[str, Any]) -> dict[str, Any]:
-    view: dict[str, Any] = {}
-    for field in ("schema_version", "duration_sec"):
-        if field in state:
-            view[field] = state[field]
-
-    if "approaches" in state:
-        approaches = state["approaches"]
-        if isinstance(approaches, Mapping):
-            view["approaches"] = {
-                direction: _selected_fields(
-                    approaches[direction],
-                    _APPROACH_FIELDS,
-                )
-                for direction in _DIRECTIONS
-                if direction in approaches
-            }
-        else:
-            view["approaches"] = approaches
-
-    for field in ("turning_ratio", "flow_profile", "profile_bins_sec"):
-        if field in state:
-            view[field] = state[field]
-
-    if "source" in state:
-        view["source"] = _selected_fields(state["source"], _SOURCE_FIELDS)
-    return view
+    return {
+        "schema_version": state["schema_version"],
+        "duration_sec": state["duration_sec"],
+        "approaches": {
+            "north": {
+                "observed": state["approaches"]["north"]["observed"],
+                "flow_vph": state["approaches"]["north"]["flow_vph"],
+                "queue_est": state["approaches"]["north"]["queue_est"],
+                "vehicle_mix": state["approaches"]["north"]["vehicle_mix"],
+            },
+            "south": {
+                "observed": state["approaches"]["south"]["observed"],
+                "flow_vph": state["approaches"]["south"]["flow_vph"],
+                "queue_est": state["approaches"]["south"]["queue_est"],
+                "vehicle_mix": state["approaches"]["south"]["vehicle_mix"],
+            },
+            "east": {
+                "observed": state["approaches"]["east"]["observed"],
+                "flow_vph": state["approaches"]["east"]["flow_vph"],
+                "queue_est": state["approaches"]["east"]["queue_est"],
+                "vehicle_mix": state["approaches"]["east"]["vehicle_mix"],
+            },
+            "west": {
+                "observed": state["approaches"]["west"]["observed"],
+                "flow_vph": state["approaches"]["west"]["flow_vph"],
+                "queue_est": state["approaches"]["west"]["queue_est"],
+                "vehicle_mix": state["approaches"]["west"]["vehicle_mix"],
+            },
+        },
+        "turning_ratio": state["turning_ratio"],
+        "flow_profile": state["flow_profile"],
+        "profile_bins_sec": state["profile_bins_sec"],
+        "source": {
+            "fps": state["source"]["fps"],
+            "frames": state["source"]["frames"],
+            "duration_sec": state["source"]["duration_sec"],
+        },
+    }
 
 
 def _path_child(prefix: str, key: object) -> str:
@@ -120,7 +119,7 @@ def semantic_differences(
     )
 
 
-def sha256_tree(path: str | Path) -> str:
+def sha256_tree(path: Path) -> str:
     path = Path(path)
     digest = hashlib.sha256()
     files = sorted(
@@ -139,7 +138,7 @@ def sha256_tree(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def snapshot_protected_data(root: str | Path) -> dict[str, dict[str, str]]:
+def snapshot_protected_data(root: Path) -> dict[str, dict[str, str]]:
     root = Path(root).resolve()
     return {
         "files": {
@@ -154,7 +153,7 @@ def snapshot_protected_data(root: str | Path) -> dict[str, dict[str, str]]:
 
 
 def verify_protected_data(
-    root: str | Path,
+    root: Path,
     expected: Mapping[str, Any],
 ) -> None:
     actual = snapshot_protected_data(Path(root).resolve())
@@ -243,10 +242,10 @@ def _replace_pair_with_rollback(
 
 def promote_vision_evidence(
     *,
-    root: str | Path,
-    candidate_state_path: str | Path,
-    candidate_frame_path: str | Path,
-    candidate_meta_path: str | Path,
+    root: Path,
+    candidate_state_path: Path,
+    candidate_frame_path: Path,
+    candidate_meta_path: Path,
     protected_snapshot: Mapping[str, Any],
 ) -> tuple[Path, Path]:
     root = Path(root).resolve()
