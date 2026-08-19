@@ -142,12 +142,15 @@
 
 ## 7. 当前数据不变保护
 
-首次重跑在隔离输出目录进行，且TrafficState写入临时文件，不覆盖正式 `demo_001.json`。重跑后比较以下语义字段：
+首次重跑在隔离输出目录进行，且TrafficState写入临时文件，不覆盖正式 `demo_001.json`。重跑后比较以下实际存在的语义字段：
 
-- 四方向 `observed`、`flow_vph`、`vehicle_mix`与`turning_ratios`；
+- `schema_version`与`duration_sec`；
+- 四方向 `approaches` 中的 `observed`、`flow_vph`、`queue_est`与`vehicle_mix`；
+- 顶层 `turning_ratio`；
 - `flow_profile`及`profile_bins_sec`；
-- 原始计数与类别计数相关字段；
-- 视频FPS、处理帧数和时长。
+- `source` 中的视频FPS、处理帧数和时长。
+
+当前TrafficState不持久化原始计数和类别计数，因此二者不列入语义比较合同；代表帧元数据只记录当前候选帧的跟踪与类别证据，不补写不存在的全视频计数字段。
 
 时间戳、临时路径等非科学字段不参与语义等价判断。只有这些字段全部一致，才允许把新的代表帧PNG和来源元数据提升为正式视觉资产。若任一字段变化，流程停止并报告差异；不覆盖TrafficState、实验结果或正式图。
 
