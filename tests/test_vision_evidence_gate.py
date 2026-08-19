@@ -8,6 +8,7 @@ from typing import Any, get_type_hints
 import numpy as np
 import pytest
 
+import scripts.promote_vision_evidence as promotion_gate
 from scripts.promote_vision_evidence import (
     _dotted_differences,
     _replace_pair_with_rollback,
@@ -161,6 +162,36 @@ def _destination_bytes(paths: dict[str, Any]) -> tuple[bytes, bytes]:
     return (
         paths["destination_frame"].read_bytes(),
         paths["destination_meta"].read_bytes(),
+    )
+
+
+def _raw_replacement_pair(tmp_path: Path) -> dict[str, Path]:
+    paths = {
+        "source_frame": tmp_path / "source-frame",
+        "source_meta": tmp_path / "source-meta",
+        "destination_frame": tmp_path / "destination-frame",
+        "destination_meta": tmp_path / "destination-meta",
+    }
+    paths["source_frame"].write_bytes(b"new-frame")
+    paths["source_meta"].write_bytes(b"new-meta")
+    paths["destination_frame"].write_bytes(b"old-frame")
+    paths["destination_meta"].write_bytes(b"old-meta")
+    return paths
+
+
+def _raw_destination_bytes(paths: dict[str, Path]) -> tuple[bytes, bytes]:
+    return (
+        paths["destination_frame"].read_bytes(),
+        paths["destination_meta"].read_bytes(),
+    )
+
+
+def _transaction_artifacts(tmp_path: Path) -> list[Path]:
+    return sorted(
+        path
+        for path in tmp_path.iterdir()
+        if path.name.startswith(".")
+        and path.suffix in {".tmp", ".backup", ".restore"}
     )
 
 
@@ -371,6 +402,33 @@ def test_promote_rejects_tampered_candidate_png_without_touching_formal_pair(
     assert _destination_bytes(evidence_root) == before
 
 
+def test_promote_rejects_candidate_video_path_incompatible_with_formal_state(
+    evidence_root: dict[str, Any],
+) -> None:
+    candidate = json.loads(
+        evidence_root["candidate_state"].read_text(encoding="utf-8")
+    )
+    candidate["source"]["video"] = "temporary/candidate.mp4"
+    _write_json(evidence_root["candidate_state"], candidate)
+    metadata = json.loads(
+        evidence_root["candidate_meta"].read_text(encoding="utf-8")
+    )
+    metadata["video"]["path"] = "temporary/candidate.mp4"
+    _write_json(evidence_root["candidate_meta"], metadata)
+    before = _destination_bytes(evidence_root)
+
+    with pytest.raises(ValueError, match=r"^video\.path:"):
+        promote_vision_evidence(
+            root=evidence_root["root"],
+            candidate_state_path=evidence_root["candidate_state"],
+            candidate_frame_path=evidence_root["candidate_frame"],
+            candidate_meta_path=evidence_root["candidate_meta"],
+            protected_snapshot=evidence_root["snapshot"],
+        )
+
+    assert _destination_bytes(evidence_root) == before
+
+
 def test_promote_atomically_replaces_only_formal_evidence_pair(
     evidence_root: dict[str, Any],
 ) -> None:
@@ -423,6 +481,192 @@ def test_replace_pair_rolls_back_both_destinations_when_post_verify_fails(
 
     assert destination_frame.read_bytes() == b"old-frame"
     assert destination_meta.read_bytes() == b"old-meta"
+
+
+def test_replace_pair_stage_copy_failure_leaves_pair_and_no_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _raw_replacement_pair(tmp_path)
+    real_copy2 = promotion_gate.shutil.copy2
+
+    def fail_frame_stage_copy(source: Any, destination: Any) -> Any:
+        if (
+            Path(source) == paths["source_frame"]
+            and Path(destination).suffix == ".tmp"
+        ):
+            raise OSError("stage copy failed")
+        return real_copy2(source, destination)
+
+    monkeypatch.setattr(promotion_gate.shutil, "copy2", fail_frame_stage_copy)
+
+    with pytest.raises(OSError, match="stage copy failed"):
+        _replace_pair_with_rollback(
+            paths["source_frame"],
+            paths["source_meta"],
+            paths["destination_frame"],
+            paths["destination_meta"],
+            lambda: None,
+        )
+
+    assert _raw_destination_bytes(paths) == (b"old-frame", b"old-meta")
+    assert _transaction_artifacts(tmp_path) == []
+
+
+def test_replace_pair_first_replace_failure_leaves_pair_and_no_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _raw_replacement_pair(tmp_path)
+    real_replace = promotion_gate.os.replace
+
+    def fail_first_formal_replace(source: Any, destination: Any) -> Any:
+        if (
+            Path(source).suffix == ".tmp"
+            and Path(destination) == paths["destination_frame"]
+        ):
+            raise OSError("first replace failed")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(promotion_gate.os, "replace", fail_first_formal_replace)
+
+    with pytest.raises(OSError, match="first replace failed"):
+        _replace_pair_with_rollback(
+            paths["source_frame"],
+            paths["source_meta"],
+            paths["destination_frame"],
+            paths["destination_meta"],
+            lambda: None,
+        )
+
+    assert _raw_destination_bytes(paths) == (b"old-frame", b"old-meta")
+    assert _transaction_artifacts(tmp_path) == []
+
+
+def test_replace_pair_second_replace_failure_restores_pair_and_no_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _raw_replacement_pair(tmp_path)
+    real_replace = promotion_gate.os.replace
+
+    def fail_second_formal_replace(source: Any, destination: Any) -> Any:
+        if (
+            Path(source).suffix == ".tmp"
+            and Path(destination) == paths["destination_meta"]
+        ):
+            raise OSError("second replace failed")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(promotion_gate.os, "replace", fail_second_formal_replace)
+
+    with pytest.raises(OSError, match="second replace failed"):
+        _replace_pair_with_rollback(
+            paths["source_frame"],
+            paths["source_meta"],
+            paths["destination_frame"],
+            paths["destination_meta"],
+            lambda: None,
+        )
+
+    assert _raw_destination_bytes(paths) == (b"old-frame", b"old-meta")
+    assert _transaction_artifacts(tmp_path) == []
+
+
+def test_replace_pair_keeps_durable_backup_when_rollback_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _raw_replacement_pair(tmp_path)
+    real_replace = promotion_gate.os.replace
+
+    def fail_meta_replace_and_frame_rollback(source: Any, destination: Any) -> Any:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if (
+            source_path.suffix == ".tmp"
+            and destination_path == paths["destination_meta"]
+        ):
+            raise OSError("second replace failed")
+        if (
+            source_path.suffix == ".backup"
+            and destination_path == paths["destination_frame"]
+        ):
+            raise OSError("frame rollback failed")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(
+        promotion_gate.os,
+        "replace",
+        fail_meta_replace_and_frame_rollback,
+    )
+
+    with pytest.raises(RuntimeError, match="rollback") as exc_info:
+        _replace_pair_with_rollback(
+            paths["source_frame"],
+            paths["source_meta"],
+            paths["destination_frame"],
+            paths["destination_meta"],
+            lambda: None,
+        )
+
+    frame_backups = list(
+        tmp_path.glob(f".{paths['destination_frame'].name}.*.backup")
+    )
+    assert len(frame_backups) == 1
+    assert frame_backups[0].read_bytes() == b"old-frame"
+    error_message = str(exc_info.value)
+    assert str(paths["destination_frame"].resolve()) in error_message
+    assert str(frame_backups[0].resolve()) in error_message
+    assert paths["destination_meta"].read_bytes() == b"old-meta"
+    assert list(tmp_path.glob(".*.tmp")) == []
+
+
+def test_replace_pair_continues_other_rollback_after_first_restore_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _raw_replacement_pair(tmp_path)
+    real_replace = promotion_gate.os.replace
+    attempted_meta_rollback = False
+
+    def fail_frame_rollback(source: Any, destination: Any) -> Any:
+        nonlocal attempted_meta_rollback
+        source_path = Path(source)
+        destination_path = Path(destination)
+        if (
+            source_path.suffix == ".backup"
+            and destination_path == paths["destination_frame"]
+        ):
+            raise OSError("frame rollback failed")
+        if (
+            source_path.suffix == ".backup"
+            and destination_path == paths["destination_meta"]
+        ):
+            attempted_meta_rollback = True
+        return real_replace(source, destination)
+
+    monkeypatch.setattr(promotion_gate.os, "replace", fail_frame_rollback)
+
+    def fail_post_verification() -> None:
+        raise ValueError("post verification failed")
+
+    with pytest.raises(RuntimeError, match="rollback"):
+        _replace_pair_with_rollback(
+            paths["source_frame"],
+            paths["source_meta"],
+            paths["destination_frame"],
+            paths["destination_meta"],
+            fail_post_verification,
+        )
+
+    assert attempted_meta_rollback is True
+    assert paths["destination_meta"].read_bytes() == b"old-meta"
+    frame_backups = list(
+        tmp_path.glob(f".{paths['destination_frame'].name}.*.backup")
+    )
+    assert len(frame_backups) == 1
+    assert frame_backups[0].read_bytes() == b"old-frame"
 
 
 def test_snapshot_and_verify_cli_round_trip(

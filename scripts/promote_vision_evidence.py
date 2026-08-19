@@ -204,40 +204,80 @@ def _replace_pair_with_rollback(
         f".{destination_frame.name}.{token}.tmp"
     )
     staged_meta = destination_meta.parent / f".{destination_meta.name}.{token}.tmp"
-    restore_frame = destination_frame.parent / (
-        f".{destination_frame.name}.{token}.restore"
+    backup_frame = destination_frame.parent / (
+        f".{destination_frame.name}.{token}.backup"
     )
-    restore_meta = destination_meta.parent / (
-        f".{destination_meta.name}.{token}.restore"
+    backup_meta = destination_meta.parent / (
+        f".{destination_meta.name}.{token}.backup"
     )
-    original_frame = (
-        destination_frame.read_bytes() if destination_frame.exists() else None
-    )
-    original_meta = destination_meta.read_bytes() if destination_meta.exists() else None
+    frame_existed = destination_frame.exists()
+    meta_existed = destination_meta.exists()
+    frame_replaced = False
+    meta_replaced = False
+    preserve_backups = False
 
     try:
+        if frame_existed:
+            shutil.copy2(destination_frame, backup_frame)
+        if meta_existed:
+            shutil.copy2(destination_meta, backup_meta)
         shutil.copy2(source_frame, staged_frame)
         shutil.copy2(source_meta, staged_meta)
         os.replace(staged_frame, destination_frame)
+        frame_replaced = True
         os.replace(staged_meta, destination_meta)
+        meta_replaced = True
         verify_after_replace()
-    except Exception:
-        if original_frame is None:
-            destination_frame.unlink(missing_ok=True)
-        else:
-            restore_frame.write_bytes(original_frame)
-            os.replace(restore_frame, destination_frame)
-        if original_meta is None:
-            destination_meta.unlink(missing_ok=True)
-        else:
-            restore_meta.write_bytes(original_meta)
-            os.replace(restore_meta, destination_meta)
+    except Exception as original_error:
+        rollback_errors: list[tuple[Path, Exception]] = []
+        rollback_targets = (
+            (
+                destination_frame,
+                frame_replaced,
+                backup_frame if frame_existed else None,
+            ),
+            (
+                destination_meta,
+                meta_replaced,
+                backup_meta if meta_existed else None,
+            ),
+        )
+        for destination, replaced, backup in rollback_targets:
+            if not replaced:
+                continue
+            try:
+                if backup is None:
+                    destination.unlink(missing_ok=True)
+                else:
+                    os.replace(backup, destination)
+            except Exception as rollback_error:
+                rollback_errors.append((destination, rollback_error))
+
+        if rollback_errors:
+            preserve_backups = True
+            failed_targets = ", ".join(
+                f"{destination.resolve()} ({error})"
+                for destination, error in rollback_errors
+            )
+            retained_backups = [
+                str(backup.resolve())
+                for backup in (backup_frame, backup_meta)
+                if backup.exists()
+            ]
+            retained_description = (
+                ", ".join(retained_backups) if retained_backups else "<none>"
+            )
+            raise RuntimeError(
+                f"rollback failed for {failed_targets}; "
+                f"retained backups: {retained_description}"
+            ) from original_error
         raise
     finally:
         staged_frame.unlink(missing_ok=True)
         staged_meta.unlink(missing_ok=True)
-        restore_frame.unlink(missing_ok=True)
-        restore_meta.unlink(missing_ok=True)
+        if not preserve_backups:
+            backup_frame.unlink(missing_ok=True)
+            backup_meta.unlink(missing_ok=True)
 
 
 def promote_vision_evidence(
@@ -273,7 +313,7 @@ def promote_vision_evidence(
         candidate_meta_path,
         video_path,
         roi_path,
-        candidate_state,
+        reference_state,
     )
 
     destination_frame = root / "figures/fig_vision_annotated_frame.png"
@@ -285,7 +325,7 @@ def promote_vision_evidence(
             destination_meta,
             video_path,
             roi_path,
-            candidate_state,
+            reference_state,
         )
         verify_protected_data(root, protected_snapshot)
 
