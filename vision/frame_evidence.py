@@ -275,7 +275,7 @@ def load_and_validate_frame_evidence(
     meta_path: str | Path,
     video_path: str | Path,
     roi_path: str | Path,
-    traffic_state: object,
+    traffic_state: Mapping[str, Any],
 ) -> dict[str, Any]:
     frame_path = Path(frame_path)
     meta_path = Path(meta_path)
