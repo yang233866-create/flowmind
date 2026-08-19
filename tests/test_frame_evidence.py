@@ -306,6 +306,79 @@ def test_frame_evidence_rejects_tampered_contract_fields(
         )
 
 
+def test_frame_evidence_rejects_non_deterministic_active_zoom_track(
+    tmp_path: Path,
+) -> None:
+    frame_path, meta_path, video_path, roi_path, traffic_state = (
+        _write_valid_evidence(tmp_path)
+    )
+    metadata = _read_metadata(meta_path)
+    metadata["tracks"].append(
+        {
+            "track_id": 9,
+            "class_name": "truck",
+            "bbox_xyxy": [20.0, 2.0, 25.0, 7.0],
+            "trace_points": [[22.0, 4.0]],
+        }
+    )
+    metadata["active_track_count"] = 2
+    metadata["active_trace_point_count"] = 3
+    metadata["zoom"] = {
+        "track_id": 9,
+        "crop_xyxy": [19, 1, 26, 8],
+    }
+    _write_metadata(meta_path, metadata)
+
+    with pytest.raises(ValueError, match=r"^zoom\.track_id:"):
+        load_and_validate_frame_evidence(
+            frame_path,
+            meta_path,
+            video_path,
+            roi_path,
+            traffic_state,
+        )
+
+
+def test_frame_evidence_rejects_non_deterministic_zoom_crop(
+    tmp_path: Path,
+) -> None:
+    frame_path, meta_path, video_path, roi_path, traffic_state = (
+        _write_valid_evidence(tmp_path)
+    )
+    metadata = _read_metadata(meta_path)
+    metadata["zoom"]["crop_xyxy"] = [4, 4, 17, 18]
+    _write_metadata(meta_path, metadata)
+
+    with pytest.raises(ValueError, match=r"^zoom\.crop_xyxy:"):
+        load_and_validate_frame_evidence(
+            frame_path,
+            meta_path,
+            video_path,
+            roi_path,
+            traffic_state,
+        )
+
+
+def test_frame_evidence_rejects_missing_zoom_for_active_tracks(
+    tmp_path: Path,
+) -> None:
+    frame_path, meta_path, video_path, roi_path, traffic_state = (
+        _write_valid_evidence(tmp_path)
+    )
+    metadata = _read_metadata(meta_path)
+    metadata["zoom"] = None
+    _write_metadata(meta_path, metadata)
+
+    with pytest.raises(ValueError, match=r"^zoom:"):
+        load_and_validate_frame_evidence(
+            frame_path,
+            meta_path,
+            video_path,
+            roi_path,
+            traffic_state,
+        )
+
+
 def test_frame_evidence_rejects_duplicate_track_ids(tmp_path: Path) -> None:
     frame_path, meta_path, video_path, roi_path, traffic_state = (
         _write_valid_evidence(tmp_path)

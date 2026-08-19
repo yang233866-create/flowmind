@@ -124,16 +124,18 @@ def _bbox_area(track: TrackEvidence) -> float:
     return max(0.0, x2 - x1) * max(0.0, y2 - y1)
 
 
-def select_zoom(
-    representative: RepresentativeFrame,
+def _select_zoom_for_tracks(
+    tracks: Sequence[TrackEvidence],
     *,
+    image_width: int,
+    image_height: int,
     margin_ratio: float = ZOOM_MARGIN_RATIO,
 ) -> dict[str, Any] | None:
-    if not representative.tracks:
+    if not tracks:
         return None
 
     selected = max(
-        representative.tracks,
+        tracks,
         key=lambda track: (
             len(track.trace_points),
             _bbox_area(track),
@@ -158,7 +160,6 @@ def select_zoom(
     right = math.ceil(envelope_x2 + width * margin_ratio)
     bottom = math.ceil(envelope_y2 + height * margin_ratio)
 
-    image_height, image_width = representative.annotated_bgr.shape[:2]
     left = max(0, min(image_width, left))
     top = max(0, min(image_height, top))
     right = max(0, min(image_width, right))
@@ -170,6 +171,22 @@ def select_zoom(
         "track_id": selected.track_id,
         "crop_xyxy": [left, top, right, bottom],
     }
+
+
+def select_zoom(
+    representative: RepresentativeFrame,
+    *,
+    margin_ratio: float = ZOOM_MARGIN_RATIO,
+) -> dict[str, Any] | None:
+    if not representative.tracks:
+        return None
+    image_height, image_width = representative.annotated_bgr.shape[:2]
+    return _select_zoom_for_tracks(
+        representative.tracks,
+        image_width=image_width,
+        image_height=image_height,
+        margin_ratio=margin_ratio,
+    )
 
 
 def sha256_file(path: str | Path) -> str:
@@ -395,6 +412,7 @@ def load_and_validate_frame_evidence(
         raise _evidence_error("tracks", "must be a list")
 
     active_track_ids: set[int] = set()
+    validated_tracks: list[TrackEvidence] = []
     trace_point_count = 0
     for track in tracks:
         if not isinstance(track, Mapping):
@@ -411,7 +429,8 @@ def load_and_validate_frame_evidence(
             )
         active_track_ids.add(track_id)
 
-        if not isinstance(track.get("class_name"), str):
+        class_name = track.get("class_name")
+        if not isinstance(class_name, str):
             raise _evidence_error("tracks.class_name", "must be a string")
 
         bbox_xyxy = track.get("bbox_xyxy")
@@ -439,6 +458,7 @@ def load_and_validate_frame_evidence(
             raise _evidence_error(
                 "tracks.trace_points", "must be a list no longer than TRACE_LENGTH"
             )
+        validated_trace_points: list[tuple[float, float]] = []
         for point in trace_points:
             if (
                 not isinstance(point, list)
@@ -456,7 +476,16 @@ def load_and_validate_frame_evidence(
                 raise _evidence_error(
                     "tracks.trace_points", "each point must be within the image bounds"
                 )
+            validated_trace_points.append((point_x, point_y))
         trace_point_count += len(trace_points)
+        validated_tracks.append(
+            TrackEvidence(
+                track_id=track_id,
+                class_name=class_name,
+                bbox_xyxy=(bbox_x1, bbox_y1, bbox_x2, bbox_y2),
+                trace_points=tuple(validated_trace_points),
+            )
+        )
 
     active_track_count = metadata.get("active_track_count")
     if (
@@ -483,8 +512,16 @@ def load_and_validate_frame_evidence(
             "no_detections", "must state whether the track list is empty"
         )
 
+    expected_zoom = _select_zoom_for_tracks(
+        validated_tracks,
+        image_width=image_width,
+        image_height=image_height,
+    )
     zoom = metadata.get("zoom")
-    if zoom is not None:
+    if zoom is None:
+        if expected_zoom is not None:
+            raise _evidence_error("zoom", "must match the deterministic zoom")
+    else:
         if not isinstance(zoom, Mapping):
             raise _evidence_error("zoom", "must be a mapping or null")
         zoom_track_id = zoom.get("track_id")
@@ -493,6 +530,10 @@ def load_and_validate_frame_evidence(
             or zoom_track_id not in active_track_ids
         ):
             raise _evidence_error("zoom.track_id", "must identify an active track")
+        if expected_zoom is None or zoom_track_id != expected_zoom["track_id"]:
+            raise _evidence_error(
+                "zoom.track_id", "must match the deterministic zoom track"
+            )
 
         crop_xyxy = zoom.get("crop_xyxy")
         if (
@@ -510,6 +551,10 @@ def load_and_validate_frame_evidence(
         ):
             raise _evidence_error(
                 "zoom.crop_xyxy", "must be a valid half-open image crop"
+            )
+        if crop_xyxy != expected_zoom["crop_xyxy"]:
+            raise _evidence_error(
+                "zoom.crop_xyxy", "must match the deterministic zoom crop"
             )
 
     return dict(metadata)
