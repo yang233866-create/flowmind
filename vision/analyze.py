@@ -51,6 +51,11 @@ if str(_ROOT) not in sys.path:
 from scripts.sci_style import DIRECTION_COLORS, apply_style, save_fig
 from vision.counter import DirectionalCounter
 from vision.detector import VehicleDetector
+from vision.frame_evidence import (
+    RepresentativeFrameSelector,
+    snapshot_active_tracks,
+    write_frame_evidence,
+)
 from vision.tracker import VehicleTracker
 from vision.traffic_state import (
     build_traffic_state,
@@ -110,6 +115,12 @@ def analyze_video(
     print(f"[analyze]   crossing sense = {counter.get_sense()} "
           "('both' counts outbound traffic too on a two-way road)")
 
+    selector = (
+        RepresentativeFrameSelector(fps=fps) if figures_dir is not None else None
+    )
+    if selector is not None and not counter.get_observed():
+        raise ValueError("figure evidence requires at least one configured count line")
+
     # Annotated video writer
     writer = None
     if annotated_video:
@@ -119,6 +130,7 @@ def analyze_video(
         writer = cv2.VideoWriter(
             str(annotated_video), fourcc, fps, (w, h)
         )
+    needs_annotations = writer is not None or selector is not None
 
     # Annotators for the video
     box_annotator = sv.BoxAnnotator(thickness=2)
@@ -139,16 +151,12 @@ def analyze_video(
 
     # Main loop
     frame_idx = 0
-    first_frame = None
     pbar = tqdm(total=total_frames, desc="[analyze]", unit="fr")
 
     while frame_idx < total_frames:
         ok, frame = cap.read()
         if not ok:
             break
-
-        if first_frame is None:
-            first_frame = frame.copy()
 
         detections = detector.detect(frame)
         tracked = tracker.update(detections)
@@ -162,8 +170,8 @@ def analyze_video(
                 cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
                 track_positions.setdefault(tid, []).append((cx, cy))
 
-        # Annotate frame
-        if writer:
+        # Annotate once for every consumer so trace history advances once per frame.
+        if needs_annotations:
             annotated = frame.copy()
             annotated = trace_annotator.annotate(annotated, tracked)
             annotated = box_annotator.annotate(annotated, tracked)
@@ -180,7 +188,18 @@ def analyze_video(
                 zone = counter.zones[direction]
                 annotated = line_annotators[direction].annotate(annotated, zone)
 
-            writer.write(annotated)
+            if writer is not None:
+                writer.write(annotated)
+            if selector is not None:
+                selector.consider(
+                    annotated_bgr=annotated,
+                    frame_index=frame_idx,
+                    tracks=snapshot_active_tracks(
+                        tracked,
+                        trace_annotator,
+                        class_name=detector.class_name,
+                    ),
+                )
 
         frame_idx += 1
         pbar.update(1)
@@ -191,6 +210,7 @@ def analyze_video(
         writer.release()
         print(f"[analyze] annotated video: {annotated_video}")
 
+    representative = selector.result() if selector is not None else None
     duration_sec = frame_idx / fps
 
     # Build TrafficState
@@ -233,11 +253,20 @@ def analyze_video(
     print(f"[analyze] TrafficState: {state_path}")
 
     # Generate figures
-    if figures_dir:
+    if figures_dir is not None:
         figures_dir = Path(figures_dir)
         figures_dir.mkdir(parents=True, exist_ok=True)
+        if representative is None:
+            raise RuntimeError("figure evidence representative frame is unavailable")
+        write_frame_evidence(
+            representative,
+            frame_path=figures_dir / "fig_vision_annotated_frame.png",
+            meta_path=figures_dir / "fig_vision_annotated_frame.meta.json",
+            video_path=video_path,
+            roi_config=roi_config,
+        )
         _generate_figures(
-            state, first_frame, track_positions, (w, h), figures_dir, scenario_id
+            state, track_positions, (w, h), figures_dir, scenario_id
         )
 
     return state_path
@@ -245,13 +274,12 @@ def analyze_video(
 
 def _generate_figures(
     state: dict,
-    first_frame: np.ndarray | None,
     track_positions: dict[int, list[tuple[float, float]]],
     frame_size: tuple[int, int],
     figures_dir: Path,
     scenario_id: str,
 ) -> None:
-    """Generate four PNG figures per contract."""
+    """Generate the non-evidence PNG figures per contract."""
     apply_style()
 
     # 1. Flow timeline (flow_profile over time)
@@ -294,15 +322,7 @@ def _generate_figures(
     ax.set_ylim(0, 100)
     save_fig(fig, figures_dir / f"fig_vision_vehicle_mix.png")
 
-    # 3. Annotated first frame with count lines
-    if first_frame is not None:
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.imshow(cv2.cvtColor(first_frame, cv2.COLOR_BGR2RGB))
-        ax.axis("off")
-        ax.set_title("First Frame with Count Lines")
-        save_fig(fig, figures_dir / f"fig_vision_annotated_frame.png")
-
-    # 4. Track heatmap
+    # 3. Track heatmap
     fig, ax = plt.subplots(figsize=(10, 6))
     w, h = frame_size
     heatmap = np.zeros((h, w), dtype=np.float32)

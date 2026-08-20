@@ -36,6 +36,7 @@ data/results/scenario_specs/
 # ---- 根目录备份 / 临时目录 ----
 _backup_prerun_*/
 _*/
+.worktrees/
 
 # ---- figures 论文图（目录内只有 PNG，画廊需要展示，无需忽略）----
 
